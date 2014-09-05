@@ -1017,7 +1017,7 @@ import org.apache.spark.annotation.DeveloperApi
    *
    *  Read! Eval! Print! Some of that not yet centralized here.
    */
-  class ReadEvalPrint(val lineId: Int) {
+  class ReadEvalPrint(lineId: Int) {
     def this() = this(freshLineId())
 
     private var lastRun: Run = _
@@ -1171,16 +1171,11 @@ import org.apache.spark.annotation.DeveloperApi
     def definedTypeSymbol(name: String) = definedSymbols(newTypeName(name))
     def definedTermSymbol(name: String) = definedSymbols(newTermName(name))
 
-    val definedClasses = handlers.exists {
-      case _: ClassHandler => true
-      case _ => false
-    }
-
     /** Code to import bound names from previous lines - accessPath is code to
      * append to objectName to access anything bound by request.
      */
     val SparkComputedImports(importsPreamble, importsTrailer, accessPath) =
-      importsCode(referencedNames.toSet, definedClasses)
+      importsCode(referencedNames.toSet)
 
     /** Code to access a variable with the specified name */
     def fullPath(vname: String) = {
@@ -1688,10 +1683,7 @@ import org.apache.spark.annotation.DeveloperApi
     // old style
     beSilentDuring(parse(code)) foreach { ts =>
       ts foreach { t =>
-        if (isShow || isShowRaw)
-          withoutUnwrapping(echo(asCompactString(t)))
-        else
-          withoutUnwrapping(logDebug(asCompactString(t)))
+        withoutUnwrapping(logDebug(asCompactString(t)))
       }
     }
   }

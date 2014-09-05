@@ -232,18 +232,6 @@ class ReplSuite extends SparkFunSuite {
     assertContains("res4: Array[Int] = Array(0, 0, 0, 0, 0)", output)
   }
 
-  test("SPARK-1199 two instances of same class don't type check.") {
-    val output = runInterpreter("local-cluster[1,1,1024]",
-      """
-        |case class Sum(exp: String, exp2: String)
-        |val a = Sum("A", "B")
-        |def b(a: Sum): String = a match { case Sum(_, _) => "Found Sum" }
-        |b(a)
-      """.stripMargin)
-    assertDoesNotContain("error:", output)
-    assertDoesNotContain("Exception", output)
-  }
-
   test("SPARK-2452 compound statements.") {
     val output = runInterpreter("local",
       """
@@ -386,3 +374,4 @@ class ReplSuite extends SparkFunSuite {
     assertContains("ret: Array[(Int, Iterable[Foo])] = Array((1,", output)
   }
 }
+
