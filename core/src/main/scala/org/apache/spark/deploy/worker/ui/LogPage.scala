@@ -31,7 +31,7 @@ import org.apache.spark.util.logging.RollingFileAppender
 private[ui] class LogPage(parent: WorkerWebUI) extends WebUIPage("logPage") with Logging {
   private val worker = parent.worker
   private val workDir = parent.workDir
-  private val supportedLogTypes = Set("stderr", "stdout")
+  private val supportedLogTypes = Set("stderr", "stdout", "log4j")
 
   def renderLog(request: HttpServletRequest): String = {
     val defaultBytes = 100 * 1024
@@ -43,10 +43,12 @@ private[ui] class LogPage(parent: WorkerWebUI) extends WebUIPage("logPage") with
     val offset = Option(request.getParameter("offset")).map(_.toLong)
     val byteLength = Option(request.getParameter("byteLength")).map(_.toInt).getOrElse(defaultBytes)
 
-    val logDir = (appId, executorId, driverId) match {
-      case (Some(a), Some(e), None) =>
+    val logDir = (appId, executorId, driverId, logType) match {
+      case (Some(a), Some(e), None, "log4j") =>
+        s"${workDir.getPath}/$appId/$executorId/logs/"
+      case (Some(a), Some(e), None, _) =>
         s"${workDir.getPath}/$appId/$executorId/"
-      case (None, None, Some(d)) =>
+      case (None, None, Some(d), _) =>
         s"${workDir.getPath}/$driverId/"
       case _ =>
         throw new Exception("Request must specify either application or driver identifiers")
@@ -66,10 +68,12 @@ private[ui] class LogPage(parent: WorkerWebUI) extends WebUIPage("logPage") with
     val offset = Option(request.getParameter("offset")).map(_.toLong)
     val byteLength = Option(request.getParameter("byteLength")).map(_.toInt).getOrElse(defaultBytes)
 
-    val (logDir, params, pageName) = (appId, executorId, driverId) match {
-      case (Some(a), Some(e), None) =>
+    val (logDir, params, pageName) = (appId, executorId, driverId, logType) match {
+      case (Some(a), Some(e), None, "log4j") =>
+        (s"${workDir.getPath}/$a/$e/logs/", s"appId=$a&executorId=$e", s"$a/$e")
+      case (Some(a), Some(e), None, _) =>
         (s"${workDir.getPath}/$a/$e/", s"appId=$a&executorId=$e", s"$a/$e")
-      case (None, None, Some(d)) =>
+      case (None, None, Some(d), _) =>
         (s"${workDir.getPath}/$d/", s"driverId=$d", d)
       case _ =>
         throw new Exception("Request must specify either application or driver identifiers")
@@ -145,7 +149,11 @@ private[ui] class LogPage(parent: WorkerWebUI) extends WebUIPage("logPage") with
     }
 
     try {
-      val files = RollingFileAppender.getSortedRolledOverFiles(logDirectory, logType)
+      val (pattern, active) = logType match {
+        case "log4j" => ("""[\d-]+\.log\.gz""".r, "active.log")
+        case stream => (raw"""$stream.*""".r, stream)
+      }
+      val files = RollingFileAppender.getSortedRolledOverFiles(logDirectory, pattern, active)
       logDebug(s"Sorted log files of type $logType in $logDirectory:\n${files.mkString("\n")}")
 
       val totalLength = files.map { _.length }.sum

@@ -116,6 +116,8 @@ private[ui] class WorkerPage(parent: WorkerWebUI) extends WebUIPage("") {
         </ul>
       </td>
       <td>
+     <a href={"logPage?appId=%s&executorId=%s&logType=log4j"
+        .format(executor.appId, executor.execId)}>log4j</a>
      <a href={"logPage?appId=%s&executorId=%s&logType=stdout"
         .format(executor.appId, executor.execId)}>stdout</a>
      <a href={"logPage?appId=%s&executorId=%s&logType=stderr"

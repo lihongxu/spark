@@ -23,6 +23,8 @@ import com.google.common.io.Files
 import org.apache.spark.SparkConf
 import RollingFileAppender._
 
+import scala.util.matching.Regex
+
 /**
  * Continuously appends data from input stream into the given file, and rolls
  * over the file after the given interval. The rolled over files are named
@@ -142,20 +144,20 @@ private[spark] object RollingFileAppender {
   val DEFAULT_BUFFER_SIZE = 8192
 
   /**
-   * Get the sorted list of rolled over files. This assumes that the all the rolled
-   * over file names are prefixed with the `activeFileName`, and the active file
-   * name has the latest logs. So it sorts all the rolled over logs (that are
-   * prefixed with `activeFileName`) and appends the active file
+   * Get the sorted list of rolled over files. This function assumes that all the rolled files
+   * match some regular expression, and that the `activeFileName` contains the latest logs.
    */
-  def getSortedRolledOverFiles(directory: String, activeFileName: String): Seq[File] = {
-    val rolledOverFiles = new File(directory).getAbsoluteFile.listFiles.filter { file =>
-      val fileName = file.getName
-      fileName.startsWith(activeFileName) && fileName != activeFileName
-    }.sorted
+  def getSortedRolledOverFiles(directory: String, re: Regex, activeFileName: String): Seq[File] = {
+    val rolledFiles = {
+      val dir = new File(directory)
+      dir.getAbsoluteFile.listFiles.filter { file =>
+        re.pattern.matcher(file.getName).matches && file.getName != activeFileName
+      }
+    }
     val activeFile = {
       val file = new File(directory, activeFileName).getAbsoluteFile
       if (file.exists) Some(file) else None
     }
-    rolledOverFiles ++ activeFile
+    rolledFiles ++ activeFile
   }
 }

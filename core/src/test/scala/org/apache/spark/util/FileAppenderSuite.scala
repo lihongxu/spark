@@ -32,7 +32,8 @@ import org.apache.spark.util.logging.{RollingFileAppender, SizeBasedRollingPolic
 
 class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter with Logging {
 
-  val testFile = new File(Utils.createTempDir(), "FileAppenderSuite-test").getAbsoluteFile
+  val prefix = Utils.createTempDir().toString
+  val testFile = new File(prefix + "/FileAppenderSuite-test").getAbsoluteFile
 
   before {
     cleanup()
@@ -99,7 +100,7 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter with Logging {
       testOutputStream.write(items(i).getBytes(UTF_8))
       testOutputStream.flush()
       allGeneratedFiles ++= RollingFileAppender.getSortedRolledOverFiles(
-        testFile.getParentFile.toString, testFile.getName).map(_.toString)
+        testFile.getParentFile.toString, s"$prefix.*".r, testFile.getName).map(_.toString)
 
       Thread.sleep(10)
     }
@@ -114,7 +115,7 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter with Logging {
     assert(rolledOverFiles.size > 2)
     val earliestRolledOverFile = rolledOverFiles.head
     val existingRolledOverFiles = RollingFileAppender.getSortedRolledOverFiles(
-      testFile.getParentFile.toString, testFile.getName).map(_.toString)
+      testFile.getParentFile.toString, s"$prefix.*".r, testFile.getName).map(_.toString)
     logInfo("Existing rolled over files:\n" + existingRolledOverFiles.mkString("\n"))
     assert(!existingRolledOverFiles.toSet.contains(earliestRolledOverFile))
   }
@@ -213,7 +214,7 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter with Logging {
 
     // verify whether all the data written to rolled over files is same as expected
     val generatedFiles = RollingFileAppender.getSortedRolledOverFiles(
-      testFile.getParentFile.toString, testFile.getName)
+      testFile.getParentFile.toString, s"$prefix.*".r, testFile.getName)
     logInfo("Filtered files: \n" + generatedFiles.mkString("\n"))
     assert(generatedFiles.size > 1)
     val allText = generatedFiles.map { file =>

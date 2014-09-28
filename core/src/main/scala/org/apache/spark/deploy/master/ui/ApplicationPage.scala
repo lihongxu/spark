@@ -106,6 +106,8 @@ private[ui] class ApplicationPage(parent: MasterWebUI) extends WebUIPage("app") 
       <td>{executor.memory}</td>
       <td>{executor.state}</td>
       <td>
+        <a href={"%s/logPage?appId=%s&executorId=%s&logType=log4j"
+          .format(executor.worker.webUiAddress, executor.application.id, executor.id)}>log4j</a>
         <a href={"%s/logPage?appId=%s&executorId=%s&logType=stdout"
           .format(executor.worker.webUiAddress, executor.application.id, executor.id)}>stdout</a>
         <a href={"%s/logPage?appId=%s&executorId=%s&logType=stderr"
