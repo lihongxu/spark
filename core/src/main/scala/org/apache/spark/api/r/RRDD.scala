@@ -373,7 +373,7 @@ private[r] object RRDD {
       sparkConf.setExecutorEnv(name.toString, value.toString)
     }
 
-    val jsc = new JavaSparkContext(sparkConf)
+    val jsc = new JavaSparkContext(SparkContext.getOrCreate(sparkConf))
     jars.foreach { jar =>
       jsc.addJar(jar)
     }

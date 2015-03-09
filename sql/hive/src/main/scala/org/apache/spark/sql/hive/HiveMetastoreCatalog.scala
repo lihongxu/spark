@@ -96,7 +96,7 @@ private[hive] object HiveSerDe {
   }
 }
 
-private[hive] class HiveMetastoreCatalog(val client: ClientInterface, hive: HiveContext)
+class HiveMetastoreCatalog(val client: ClientInterface, hive: HiveContext)
   extends Catalog with Logging {
 
   val conf = hive.conf
@@ -875,8 +875,7 @@ private[hive] case class MetastoreRelation
   }
 }
 
-
-private[hive] object HiveMetastoreTypes {
+object HiveMetastoreTypes {
   def toDataType(metastoreType: String): DataType = DataTypeParser.parse(metastoreType)
 
   def decimalMetastoreString(decimalType: DecimalType): String = decimalType match {

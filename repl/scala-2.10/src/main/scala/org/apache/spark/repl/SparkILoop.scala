@@ -73,9 +73,9 @@ class SparkILoop(
   private var in: InteractiveReader = _   // the input stream from which commands come
 
   // NOTE: Exposed in package for testing
-  private[repl] var settings: Settings = _
+  var settings: Settings = _
 
-  private[repl] var intp: SparkIMain = _
+  var intp: SparkIMain = _
 
   @deprecated("Use `intp` instead.", "2.9.0") def interpreter = intp
   @deprecated("Use `intp` instead.", "2.9.0") def interpreter_= (i: SparkIMain): Unit = intp = i
@@ -146,7 +146,7 @@ class SparkILoop(
   protected val originalClassLoader = Utils.getContextOrSparkClassLoader
 
   // classpath entries added via :cp
-  private var addedClasspath: String = ""
+  var addedClasspath: String = ""
 
   /** A reverse list of commands to replay if the user requests a :replay */
   private var replayCommandStack: List[String] = Nil
@@ -741,7 +741,7 @@ class SparkILoop(
     }
   }
 
-  private def addClasspath(arg: String): Unit = {
+  def addClasspath(arg: String): Unit = {
     val f = File(arg).normalize
     if (f.exists) {
       addedClasspath = ClassPath.join(addedClasspath, f.path)

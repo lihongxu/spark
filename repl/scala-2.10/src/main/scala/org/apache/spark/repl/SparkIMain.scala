@@ -96,7 +96,7 @@ import org.apache.spark.annotation.DeveloperApi
 
     private val SPARK_DEBUG_REPL: Boolean = (System.getenv("SPARK_DEBUG_REPL") == "1")
     /** Local directory to save .class files too */
-    private lazy val outputDir = {
+    lazy val outputDir = {
       val tmp = System.getProperty("java.io.tmpdir")
       val rootDir = conf.get("spark.repl.classdir",  tmp)
       Utils.createTempDir(rootDir)
@@ -224,7 +224,7 @@ import org.apache.spark.annotation.DeveloperApi
 
     // argument is a thunk to execute after init is done
     // NOTE: Exposed to repl package since used by SparkILoop
-    private[repl] def initialize(postInitSignal: => Unit) {
+    def initialize(postInitSignal: => Unit) {
       synchronized {
         if (_isInitialized == null) {
           _isInitialized = io.spawn {
@@ -389,7 +389,7 @@ import org.apache.spark.annotation.DeveloperApi
     def clearExecutionWrapper() = _executionWrapper = ""
 
     /** interpreter settings */
-    private lazy val isettings = new SparkISettings(this)
+    lazy val isettings = new SparkISettings(this)
 
     /**
      * Instantiates a new compiler used by SparkIMain. Overridable to provide
@@ -495,7 +495,7 @@ import org.apache.spark.annotation.DeveloperApi
     }
 
     // NOTE: Exposed to repl package since used by SparkILoop
-    private[repl] def classLoader: AbstractFileClassLoader = {
+    def classLoader: AbstractFileClassLoader = {
       ensureClassLoader()
       _classLoader
     }
@@ -522,11 +522,11 @@ import org.apache.spark.annotation.DeveloperApi
           _runtimeClassLoader
       })
 
-    private def getInterpreterClassLoader() = classLoader
+    def getInterpreterClassLoader() = classLoader
 
     // Set the current Java "context" class loader to this interpreter's class loader
     // NOTE: Exposed to repl package since used by SparkILoopInit
-    private[repl] def setContextClassLoader() = classLoader.setAsContext()
+    def setContextClassLoader() = classLoader.setAsContext()
 
     /**
      * Returns the real name of a class based on its repl-defined name.
