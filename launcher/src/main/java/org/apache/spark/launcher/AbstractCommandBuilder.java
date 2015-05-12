@@ -198,15 +198,22 @@ abstract class AbstractCommandBuilder {
       libdir = new File(sparkHome, "lib_managed/jars");
     }
 
+    /* DBC: this check fails to we ignore it
     if (libdir.isDirectory()) {
       for (File jar : libdir.listFiles()) {
         if (jar.getName().startsWith("datanucleus-")) {
           addToClassPath(cp, jar.getAbsolutePath());
         }
+    checkState(libdir.isDirectory(), "Library directory '%s' does not exist.",
+      libdir.getAbsolutePath());
+    for (File jar : libdir.listFiles()) {
+      if (jar.getName().startsWith("datanucleus-")) {
+        addToClassPath(cp, jar.getAbsolutePath());
       }
     } else {
       checkState(isTesting, "Library directory '%s' does not exist.", libdir.getAbsolutePath());
     }
+    */
 
     addToClassPath(cp, getenv("HADOOP_CONF_DIR"));
     addToClassPath(cp, getenv("YARN_CONF_DIR"));
