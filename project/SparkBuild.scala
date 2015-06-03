@@ -242,7 +242,7 @@ object SparkBuild extends PomBuild {
   enable(inConfig(Test)(Assembly.settings))(streamingMqtt)
 
   /* Package pyspark artifacts in a separate zip file for YARN. */
-  enable(PySparkAssembly.settings)(assembly)
+  // enable(PySparkAssembly.settings)(assembly)
 
   /* Enable unidoc only for the root spark project */
   enable(Unidoc.settings)(spark)
