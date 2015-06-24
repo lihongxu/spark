@@ -210,7 +210,10 @@ object SparkBuild extends PomBuild {
         sys.error(s"$failed fatal warnings")
       }
       analysis
-    }
+    },
+
+    // Allow building on encrypted linux partitions.
+    scalacOptions ++= Seq("-Xmax-classfile-name", "120")
   )
 
   def enable(settings: Seq[Setting[_]])(projectRef: ProjectRef) = {
