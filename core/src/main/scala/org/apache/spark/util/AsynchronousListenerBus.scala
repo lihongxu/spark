@@ -97,7 +97,7 @@ private[spark] abstract class AsynchronousListenerBus[L <: AnyRef, E](name: Stri
    *
    * @param sc Used to stop the SparkContext in case the listener thread dies.
    */
-  def start(sc: SparkContext) {
+  def start(sc: SparkContext = null) {
     if (started.compareAndSet(false, true)) {
       sparkContext = sc
       listenerThread.start()

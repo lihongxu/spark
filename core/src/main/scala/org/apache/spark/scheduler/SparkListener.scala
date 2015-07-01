@@ -118,7 +118,7 @@ case class SparkListenerApplicationStart(
     appId: Option[String],
     time: Long,
     sparkUser: String,
-    appAttemptId: Option[String],
+    appAttemptId: Option[String] = None,
     driverLogs: Option[Map[String, String]] = None) extends SparkListenerEvent
 
 @DeveloperApi

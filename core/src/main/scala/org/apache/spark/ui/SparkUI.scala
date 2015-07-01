@@ -46,7 +46,7 @@ private[spark] class SparkUI private (
     val operationGraphListener: RDDOperationGraphListener,
     var appName: String,
     val basePath: String,
-    val startTime: Long)
+    val startTime: Long = System.currentTimeMillis())
   extends WebUI(securityManager, SparkUI.getUIPort(conf), conf, basePath, "SparkUI")
   with Logging
   with UIRoot {
