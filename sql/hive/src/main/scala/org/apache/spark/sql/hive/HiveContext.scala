@@ -156,7 +156,8 @@ class HiveContext private[hive](
    * this does not necessarily need to be the same version of Hive that is used internally by
    * Spark SQL for execution.
    */
-  protected[hive] def hiveMetastoreVersion: String = getConf(HIVE_METASTORE_VERSION)
+  protected[hive] def hiveMetastoreVersion: String =
+    getConf(HIVE_METASTORE_VERSION, "0.13.0")
 
   /**
    * The location of the jars that should be used to instantiate the HiveMetastoreClient.  This
@@ -672,7 +673,7 @@ private[hive] object HiveContext {
     doc = "Version of Hive used internally by Spark SQL.")
 
   val HIVE_METASTORE_JARS = stringConf("spark.sql.hive.metastore.jars",
-    defaultValue = Some("builtin"),
+    defaultValue = Some("/mnt/driver-daemon/hive/*"),
     doc = s"""
       | Location of the jars that should be used to instantiate the HiveMetastoreClient.
       | This property can be one of three options: "
@@ -685,6 +686,7 @@ private[hive] object HiveContext {
       |   Use Hive jars of specified version downloaded from Maven repositories.
       | 3. A classpath in the standard format for both Hive and Hadoop.
     """.stripMargin)
+
   val CONVERT_METASTORE_PARQUET = booleanConf("spark.sql.hive.convertMetastoreParquet",
     defaultValue = Some(true),
     doc = "When set to false, Spark SQL will use the Hive SerDe for parquet tables instead of " +
