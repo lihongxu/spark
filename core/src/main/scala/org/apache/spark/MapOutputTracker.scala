@@ -277,7 +277,7 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   private var cacheEpoch = epoch
 
   /** Whether to compute locality preferences for reduce tasks */
-  private val shuffleLocalityEnabled = conf.getBoolean("spark.shuffle.reduceLocality.enabled", true)
+  private val shuffleLocalityEnabled = conf.getBoolean("spark.shuffle.reduceLocality.enabled", false)
 
   // Number of map and reduce tasks above which we do not assign preferred locations based on map
   // output sizes. We limit the size of jobs for which assign preferred locations as computing the
