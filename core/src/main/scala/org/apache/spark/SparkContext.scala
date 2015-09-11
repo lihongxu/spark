@@ -397,6 +397,9 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     _conf = config.clone()
     _conf.validateSettings()
 
+    // Disable speculation.
+    _conf.set("spark.speculation", "false")
+
     if (!_conf.contains("spark.master")) {
       throw new SparkException("A master URL must be set in your configuration")
     }
