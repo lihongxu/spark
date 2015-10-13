@@ -80,20 +80,19 @@ class SQLContext private[sql](
 
   // If spark.sql.allowMultipleContexts is true, we will throw an exception if a user
   // wants to create a new root SQLContext (a SLQContext that is not created by newSession).
-  private val allowMultipleContexts =
-    sparkContext.conf.getBoolean(
-      SQLConf.ALLOW_MULTIPLE_CONTEXTS.key,
-      SQLConf.ALLOW_MULTIPLE_CONTEXTS.defaultValue.get)
+  // In Databricks, we always set allowMultipleContexts to false.
+  private val allowMultipleContexts = false
 
   // Assert no root SQLContext is running when allowMultipleContexts is false.
   {
     if (!allowMultipleContexts && isRootContext) {
       SQLContext.getInstantiatedContextOption() match {
         case Some(rootSQLContext) =>
-          val errMsg = "Only one SQLContext/HiveContext may be running in this JVM. " +
-            s"It is recommended to use SQLContext.getOrCreate to get the instantiated " +
-            s"SQLContext/HiveContext. To ignore this error, " +
-            s"set ${SQLConf.ALLOW_MULTIPLE_CONTEXTS.key} = true in SparkConf."
+          val errMsg = "In Databricks, developers should utilize the shared HiveContext " +
+            "instead of creating one using the constructor. In Scala and Python notebooks, " +
+            "the shared context can be accessed as sqlContext. When running a job, " +
+            "you can access the shared context by calling " +
+            "SQLContext.getOrCreate(SparkContext.getOrCreate())."
           throw new SparkException(errMsg)
         case None => // OK
       }

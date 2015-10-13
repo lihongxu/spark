@@ -2254,9 +2254,10 @@ object SparkContext extends Logging {
 
         if (activeContext.get() != null) {
           val ctx = activeContext.get()
-          val errMsg = "Only one SparkContext may be running in this JVM (see SPARK-2243)." +
-            " To ignore this error, set spark.driver.allowMultipleContexts = true. " +
-            s"The currently running SparkContext was created at:\n${ctx.creationSite.longForm}"
+          val errMsg = "In Databricks, developers should utilize the shared SparkContext " +
+            "instead of creating one using the constructor. In Scala and Python notebooks, " +
+            "the shared context can be accessed as sc. When running a job, " +
+            "you can access the shared context by calling SparkContext.getOrCreate()."
           val exception = new SparkException(errMsg)
           if (allowMultipleContexts) {
             logWarning("Multiple running SparkContexts detected in the same JVM!", exception)
