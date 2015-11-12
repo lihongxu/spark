@@ -18,6 +18,13 @@
 import sbt._
 import sbt.Keys.version
 
+import scala.reflect.runtime.{universe => ru}
+import java.net.URLClassLoader
+import java.nio.file.Files
+import java.io.{FileInputStream, File}
+import java.util.zip.ZipInputStream
+import scala.collection.mutable.HashSet
+
 import com.typesafe.tools.mima.core._
 import com.typesafe.tools.mima.core.MissingClassProblem
 import com.typesafe.tools.mima.core.MissingTypesProblem
@@ -27,6 +34,105 @@ import com.typesafe.tools.mima.plugin.MimaPlugin.mimaDefaultSettings
 
 
 object MimaBuild {
+
+  private def getAssemblyFile: File = {
+    val f = new File(".").getCanonicalFile
+    new File(f, "assembly/target/scala-2.10/spark-assembly-1.6.0-SNAPSHOT-hadoop2.2.0.jar")
+  }
+
+  // Only the spark files, in sorted order.
+  private def allAssemblyClassNames(f: File): Seq[String] = {
+    var allClassNames: List[String] = Nil
+    val s = new ZipInputStream(new FileInputStream(f))
+    var e = s.getNextEntry
+    while (e != null) {
+      if (!e.isDirectory() && e.getName().endsWith(".class")) {
+        val c = e.getName.replace('/', '.').dropRight(6) // Drop the .class suffix
+        if (c.startsWith("org.apache.spark")) {
+          allClassNames ::= c
+        }
+      }
+      e = s.getNextEntry
+    }
+    allClassNames.sorted
+  }
+
+  // Reflection is not thread-safe in scala 2.10
+  private def packagePrivate(f: File): Seq[String] = this.synchronized {
+    val classLoader = new URLClassLoader(Array(f.toURI.toURL), classOf[String].getClassLoader)
+    val m = ru.runtimeMirror(classLoader)
+
+    val allClassNames = allAssemblyClassNames(f)
+    val ppSet: HashSet[String] = HashSet.empty
+
+    for (className <- allClassNames) {
+      val idx = className.indexOf("$")
+      val refClassName = if (idx >= 0) { className.take(idx) } else { className }
+      if (idx < 0) {
+        // Access the reflection information
+        try {
+          val clazz = m.staticClass(refClassName)
+          if (clazz.privateWithin.fullName != "<none>") {
+            ppSet.add(className)
+          }
+        } catch {
+          case _: UnsupportedOperationException =>
+          case _: AssertionError =>
+          case _: ArrayIndexOutOfBoundsException =>
+        }
+      }
+      if (ppSet.contains(refClassName)) {
+        ppSet.add(className)
+      }
+    }
+    println(s"packagePrivate: ${allClassNames.size} classes, ${ppSet.size} package private")
+    ppSet.toSeq.sorted
+  }
+
+  lazy val filterPackagePrivate = {
+    val ass = getAssemblyFile
+    println(s"filterPackagePrivate: $ass")
+    val pp = packagePrivate(ass)
+    pp.flatMap(excludeClass)
+  }
+
+//  val f = new File(".").getCanonicalFile
+//  val f2 = new File(f, "assembly/target/scala-2.10/spark-assembly-1.6.0-SNAPSHOT-hadoop2.2.0.jar")
+//  val classLoader = new URLClassLoader(Array(f2.toURI.toURL), getClass.getClassLoader)
+//  val m = ru.runtimeMirror(classLoader)
+//
+//  var allClassNames: List[String] = Nil
+//  val s = new ZipInputStream(new FileInputStream(f2))
+//  var e = s.getNextEntry
+//  while (e != null) {
+//    if (!e.isDirectory() && e.getName().endsWith(".class")) {
+//      val c = e.getName.replace('/', '.').dropRight(6) // Drop the .class suffix
+//      if (c.startsWith("org.apache.spark")) {
+//        allClassNames ::= c
+//      }
+//    }
+//    e = s.getNextEntry
+//  }
+//  allClassNames = allClassNames.sorted
+//
+//  val ppSet: HashSet[String] = HashSet.empty
+//
+//  for (className <- allClassNames) {
+//    val idx = className.indexOf("$")
+//    val refClassName = if (idx >= 0) { className.take(idx) } else { className }
+//    if (idx < 0) {
+//      // Access the reflection information
+//      val clazz = m.staticClass(refClassName)
+//      if (clazz.privateWithin.fullName != "<none>") {
+//        ppSet.add(className)
+//      } else {
+//        println(s"class $className is whitelisted")
+//      }
+//    }
+//    if (ppSet.contains(refClassName)) {
+//      ppSet.add(className)
+//    }
+//  }
 
   def excludeMember(fullName: String) = Seq(
       ProblemFilters.exclude[MissingMethodProblem](fullName),
