@@ -31,6 +31,78 @@ import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 
+object Test {
+  // The public interface for the parameters
+  trait MyParam[M <: ModelWithParameters[M], T] {
+    def name: String
+    def path: String
+    def value: T
+    def set(newValue: T): M
+  }
+
+  // Developer API for separating parameters in traits
+  trait HasParams {
+    protected type ThisModelType <: ModelWithParameters[ThisModelType]
+    protected def param[T](name: String, value: T): MyParam[ThisModelType, T]
+  }
+
+  // The goo that holds the traits with parameters, the model and the parameters together
+  abstract class ModelWithParameters[M <: ModelWithParameters[M]] (
+      _internalValues: Map[String, Any] = Map.empty) extends HasParams { self: M =>
+    override protected type ThisModelType = M
+
+    // Stuff that users should subclass:
+    def path: String
+    // This is the most annoying one
+    protected def withParams(ps: (String, Any)*): M
+    override protected def param[T](name: String, value: T): MyParam[M, T] = new MyParamInternal[T](name, value)
+
+    private class MyParamInternal[T](
+                                      val name: String,
+                                      private val initialValue: T) extends MyParam[M, T] {
+      def path = s"${self.path}/$name"
+      def set(newValue: T): M = self.withParams(name -> newValue)
+      def value = _internalValues.getOrElse(name, initialValue).asInstanceOf[T]
+    }
+  }
+
+  // Model developper API
+  trait HasBigParam extends HasParams {
+    val big = param("big", 2.0)
+  }
+
+  trait HasList extends HasParams {
+    val list: MyParam[ThisModelType, List[Int]] = param("list", Nil)
+  }
+
+  class MyModel private (private val params: Map[String, Any])
+    extends ModelWithParameters[MyModel](params) with HasBigParam with HasList {
+    protected override def withParams(ps: (String, Any)*): MyModel = new MyModel(params ++ ps)
+
+    def this() = this(Map.empty)
+    val path = "my_model"
+
+    override def toString = s"MyModel[${list.path} -> ${list.value}]"
+  }
+}
+
+
+object U {
+  val x = new Test.MyModel()
+  x.list.set(List("a").asInstanceOf[List[Int]])
+  x.big.set(5.0)
+}
+//class MyParam[M <: SomeModel[M], T](parent: M, val name: String, val value: T) {
+//  def path = s"${parent.path}/$name"
+//  def set(newValue: T): M = parent.withParams(name -> newValue)
+//}
+//
+//object MyParam {
+//  def apply[M <: SomeModel[M], T](parent: M, name: String, value: T) = new MyParam[M, T](parent, name, value)
+//}
+
+
+
 /**
  * :: DeveloperApi ::
  * A param with self-contained documentation and optionally default value. Primitive-typed param
