@@ -32,20 +32,20 @@ import org.apache.spark.util.CallSite
  * nodes and children clusters. Additionally, a graph may also have edges that enter or exit
  * the graph from nodes that belong to adjacent graphs.
  */
-private[ui] case class RDDOperationGraph(
+case class RDDOperationGraph(
     edges: Seq[RDDOperationEdge],
     outgoingEdges: Seq[RDDOperationEdge],
     incomingEdges: Seq[RDDOperationEdge],
     rootCluster: RDDOperationCluster)
 
 /** A node in an RDDOperationGraph. This represents an RDD. */
-private[ui] case class RDDOperationNode(id: Int, name: String, cached: Boolean, callsite: CallSite)
+case class RDDOperationNode(id: Int, name: String, cached: Boolean, callsite: CallSite)
 
 /**
  * A directed edge connecting two nodes in an RDDOperationGraph.
  * This represents an RDD dependency.
  */
-private[ui] case class RDDOperationEdge(fromId: Int, toId: Int)
+case class RDDOperationEdge(fromId: Int, toId: Int)
 
 /**
  * A cluster that groups nodes together in an RDDOperationGraph.
@@ -53,7 +53,7 @@ private[ui] case class RDDOperationEdge(fromId: Int, toId: Int)
  * This represents any grouping of RDDs, including operation scopes (e.g. textFile, flatMap),
  * stages, jobs, or any higher level construct. A cluster may be nested inside of other clusters.
  */
-private[ui] class RDDOperationCluster(val id: String, private var _name: String) {
+class RDDOperationCluster(val id: String, private var _name: String) {
   private val _childNodes = new ListBuffer[RDDOperationNode]
   private val _childClusters = new ListBuffer[RDDOperationCluster]
 
@@ -73,7 +73,7 @@ private[ui] class RDDOperationCluster(val id: String, private var _name: String)
   }
 }
 
-private[ui] object RDDOperationGraph extends Logging {
+object RDDOperationGraph extends Logging {
 
   val STAGE_CLUSTER_PREFIX = "stage_"
 
