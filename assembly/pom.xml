@@ -74,6 +74,12 @@
       <artifactId>spark-repl_${scala.binary.version}</artifactId>
       <version>${project.version}</version>
     </dependency>
+
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+      <version>3.0.0-beta-1</version>
+    </dependency>
   </dependencies>
 
   <build>

@@ -442,6 +442,7 @@ object Assembly {
     },
     mergeStrategy in assembly := {
       case PathList("org", "datanucleus", xs @ _*)             => MergeStrategy.discard
+      case PathList("com", "google", "protobuf", xs @ _*)             => MergeStrategy.last
       case m if m.toLowerCase.endsWith("manifest.mf")          => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*\\.sf$")      => MergeStrategy.discard
       case "log4j.properties"                                  => MergeStrategy.discard
