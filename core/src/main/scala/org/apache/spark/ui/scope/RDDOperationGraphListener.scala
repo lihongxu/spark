@@ -26,7 +26,7 @@ import org.apache.spark.ui.SparkUI
 /**
  * A SparkListener that constructs a DAG of RDD operations.
  */
-private[ui] class RDDOperationGraphListener(conf: SparkConf) extends SparkListener {
+class RDDOperationGraphListener(conf: SparkConf) extends SparkListener {
 
   // Note: the fate of jobs and stages are tied. This means when we clean up a job,
   // we always clean up all of its stages. Similarly, when we clean up a stage, we
@@ -46,6 +46,10 @@ private[ui] class RDDOperationGraphListener(conf: SparkConf) extends SparkListen
     conf.getInt("spark.ui.retainedJobs", SparkUI.DEFAULT_RETAINED_JOBS)
   private val retainedStages =
     conf.getInt("spark.ui.retainedStages", SparkUI.DEFAULT_RETAINED_STAGES)
+
+  def getAllOperationGraphs: Map[Int, Seq[RDDOperationGraph]] = {
+    jobIds.map { id => id -> getOperationGraphForJob(id)} .toMap
+  }
 
   /**
    * Return the graph metadata for all stages in the given job.
