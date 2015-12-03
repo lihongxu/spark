@@ -210,6 +210,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   // log out Spark Version in Spark driver log
   logInfo(s"Running Spark version $SPARK_VERSION")
 
+  val tfListener = new TensorFlowListener
+
   /* ------------------------------------------------------------------------------------- *
    | Private variables. These variables keep the internal state of the context, and are    |
    | not accessible by the outside world. They're mutable since we want to initialize all  |
@@ -452,6 +454,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     // "SparkEnv", some messages will be posted to "listenerBus" and we should not miss them.
     _jobProgressListener = new JobProgressListener(_conf)
     listenerBus.addListener(jobProgressListener)
+    listenerBus.addListener(tfListener)
 
     // Create the Spark execution environment (cache, map output tracker, etc)
     _env = createSparkEnv(_conf, isLocal, listenerBus)
