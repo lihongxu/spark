@@ -88,6 +88,13 @@
       <artifactId>curator-recipes</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+      <version>3.0.0-beta-1</version>
+    </dependency>
+
+
     <!-- Jetty dependencies promoted to compile here so they are shaded
          and inlined into spark-core jar -->
     <dependency>
