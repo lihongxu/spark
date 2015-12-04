@@ -1,5 +1,6 @@
 package org.apache.spark
 
+
 /**
  * Created by tjhunter on 12/3/15.
  */
@@ -9,12 +10,14 @@ object TFTest {
 
 
 
+  import org.apache.spark.ui.scope.RDDOperationGraph
   import org.apache.spark.scheduler._
 
   val tfl = sc.tfListener
   tfl.init()
 
-  val rdd1 = sc.parallelize(1 to 100).map(_.toFloat)
+  val rdd1 = sc.parallelize(1 to 100).map(_.toFloat).cache()
+  val rdd2 = sc.parallelize(1 to 100).map(_.toFloat).count()
   rdd1.groupBy(_.hashCode() % 10).mapValues(_.size).collect()
   rdd1.count()
   val b = new GraphBuilder()
@@ -23,8 +26,9 @@ object TFTest {
   tfl.writeGraph(b.build())
   tfl.stream1.flush()
 
+  RDDOperationGraph.makeDotFile(tfl.rddops.getOperationGraphForJob(0).head)
+
 
 
 }
-
 
