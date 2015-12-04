@@ -81,7 +81,7 @@ class BinaryClassificationMetrics @Since("1.3.0") (
    * @see http://en.wikipedia.org/wiki/Receiver_operating_characteristic
    */
   @Since("1.0.0")
-  def roc(): RDD[(Double, Double)] = {
+  def roc(): RDD[(Double, Double)] = cumulativeCounts.sparkContext.scope("ROC") {
     val rocCurve = createCurve(FalsePositiveRate, Recall)
     val sc = confusions.context
     val first = sc.makeRDD(Seq((0.0, 0.0)), 1)

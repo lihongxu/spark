@@ -411,7 +411,7 @@ object GraphBuilder {
       } else { 0 }
     }
     private def toTuple = (rddId, job, stage)
-    private lazy val dirList = scope ++ opInfo
+    private lazy val dirList = scope //++ opInfo
     private lazy val opInfo = Seq(s"job_$job", s"stage_$stage")
     lazy val dir = check(dirList.mkString("/"))
     lazy val name = s"${op.name}[$rddId]"
