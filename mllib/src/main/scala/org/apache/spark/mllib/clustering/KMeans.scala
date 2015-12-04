@@ -197,7 +197,7 @@ class KMeans private (
    * performance, because this is an iterative algorithm.
    */
   @Since("0.8.0")
-  def run(data: RDD[Vector]): KMeansModel = {
+  def run(data: RDD[Vector]): KMeansModel = data.sparkContext.scope("kmeans") {
 
     if (data.getStorageLevel == StorageLevel.NONE) {
       logWarning("The input data is not directly cached, which may hurt performance if its"
@@ -263,7 +263,7 @@ class KMeans private (
     val iterationStartTime = System.nanoTime()
 
     // Execute iterations of Lloyd's algorithm until all runs have converged
-    while (iteration < maxIterations && !activeRuns.isEmpty) {
+    while (iteration < maxIterations && !activeRuns.isEmpty) data.sparkContext.scope(s"run-$iteration") {
       type WeightedPoint = (Vector, Long)
       def mergeContribs(x: WeightedPoint, y: WeightedPoint): WeightedPoint = {
         axpy(1.0, x._1, y._1)

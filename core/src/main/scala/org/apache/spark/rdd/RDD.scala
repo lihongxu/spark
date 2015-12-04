@@ -136,6 +136,8 @@ abstract class RDD[T: ClassTag](
   /** The SparkContext that created this RDD. */
   def sparkContext: SparkContext = sc
 
+  val scopeTF: String = Option(sc).map(_.scopeManager.currentScope()).getOrElse("")
+
   /** A unique ID for this RDD (within its SparkContext). */
   val id: Int = sc.newRddId()
 
@@ -147,6 +149,8 @@ abstract class RDD[T: ClassTag](
     name = _name
     this
   }
+
+  val scopeFullTF = Option(sc).map(_.scopeManager.registerRDD(id)).getOrElse("")
 
   /**
    * Mark this RDD for persisting using the specified level.
@@ -1604,6 +1608,8 @@ abstract class RDD[T: ClassTag](
 
   /** User code that created this RDD (e.g. `textFile`, `parallelize`). */
   @transient private[spark] val creationSite = sc.getCallSite()
+
+  def getScope: Option[RDDOperationScope] = scope
 
   /**
    * The scope associated with the operation that created this RDD.

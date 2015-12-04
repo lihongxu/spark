@@ -11,6 +11,7 @@ import tensorflow.Graph.{GraphDef, NodeDef}
 import tensorflow._
 import scala.collection.JavaConversions._
 import scala.collection.mutable
+import scala.util.Try
 
 class TensorFlowListener(conf: SparkConf) extends SparkListener with Logging {
 
@@ -174,10 +175,35 @@ class TensorFlowListener(conf: SparkConf) extends SparkListener with Logging {
   }
 }
 
-class GraphBuilder() {
+class GraphBuilder(sc: SparkContext) {
+  case class Element(scope: Seq[String], stage: Int, job: Int, op: RDDOperationNode) extends Ordered[Element] {
+
+    def rddId = op.id
+    override def toString = s"Element(scope='${scope.mkString("/")}', stage=$stage, job=$job, rdd=${rddId})"
+    def compare(that: Element): Int = {
+      import scala.math.Ordering.Implicits._
+      val t1 = toTuple
+      val t2 = that.toTuple
+      if (t1 < t2) {
+        -1
+      } else if (t1 > t2) {
+        1
+      } else { 0 }
+    }
+    def toTuple = (rddId, job, stage)
+
+    lazy val opInfo = Seq(s"job_$job", s"stage_$stage")
+    lazy val dir = (scope ++ opInfo).mkString("/")
+    lazy val name = op.name
+    lazy val path = (scope ++ opInfo ++ Seq(name)).mkString("/")
+  }
+
   val rddIds: mutable.HashMap[Int, String] = mutable.HashMap.empty
+  val rddCreationDir: mutable.HashMap[Int, String] = mutable.HashMap.empty
+  val rddCreationPath: mutable.HashMap[Int, String] = mutable.HashMap.empty
   val rddClusterIds: mutable.HashMap[String, String] = mutable.HashMap.empty
   val nodes: mutable.HashMap[String, NodeDef] = mutable.HashMap.empty
+  val rddNodes: mutable.HashMap[Int, NodeDef] = mutable.HashMap.empty
   val orderedNodes: mutable.ArrayBuffer[NodeDef] = mutable.ArrayBuffer.empty
   val rddIdOutgoingEdges: mutable.HashMap[Int, mutable.ArrayBuffer[Int]] = mutable.HashMap.empty
   val rddIdIncomingEdges: mutable.HashMap[Int, mutable.ArrayBuffer[Int]] = mutable.HashMap.empty
@@ -197,17 +223,32 @@ class GraphBuilder() {
   }
 
   def addNode(node: RDDOperationNode, scope: String=""): NodeDef = {
-    val p = s"${scope}/${node.name}"
+    val head = sc.scopeManager.getScope(node.id).map(_ + "/").getOrElse("")
+    val p = s"$head${scope}/${node.name}"
     rddIds.put(node.id, p)
     val depRddIds = rddIdIncomingEdges.getOrElse(node.id, Nil)
     val depRddPaths = depRddIds.flatMap(rddIds.get)
     val deps = depRddPaths.flatMap(nodes.get)
-//    println(s"addNode: ${node.id} -> $p [${depRddIds}] -> [${depRddPaths}] -> [${deps.map(_.getName)}]")
+    println(s"addNode: $head $scope ${node.id} ${node.name} -> $p")
     addNode0(TensorFlowListener.node(p, "RDD", deps))
   }
 
   def addNode1(node: RDDOperationNode, opName: String, scope: String=""): NodeDef = {
-    val p = s"${scope}/${opName}"
+    val head = sc.scopeManager.getScope(node.id).getOrElse("")
+    val fullPath = {
+      val x = s"$head${scope}/${node.name}[${node.id}]"
+      if (x.startsWith("/")) {
+        x.tail
+      } else {
+        x
+      }
+    }
+    val splits = fullPath.split('/')
+    val prefix = splits.dropRight(2)
+    val suffix = splits.last
+    val stageName = splits.dropRight(1).last
+    val p = prefix.mkString("/") + "/" + suffix
+    println(s"addNode1: head=$head scop=$scope nodeid=${node.id} nodename=${node.name} opname=$opName -> $p")
     rddIds.put(node.id, p)
     val depRddIds = rddIdIncomingEdges.getOrElse(node.id, Nil)
     val depRddPaths = depRddIds.flatMap(rddIds.get)
@@ -217,6 +258,7 @@ class GraphBuilder() {
       "rdd_id" -> node.id,
       "type" -> node.name,
       "cached" -> node.cached,
+      "stage" -> stageName,
       "callsite" -> node.callsite.shortForm))
   }
 
@@ -231,45 +273,115 @@ class GraphBuilder() {
 
   }
 
+  def toElements(opGraphs: Seq[(Int, RDDOperationGraph)]): Seq[Element] = {
+    // Add all the edges
+    val allEdges = opGraphs.map(_._2).flatMap(x => x.edges ++ x.outgoingEdges ++ x.incomingEdges)
+    allEdges.foreach(e => addEdge(e.fromId, e.toId))
+
+    // Recursively build the elements
+    opGraphs.flatMap { case  (jobId, opG) => toElements(opG.rootCluster, jobId) } .sorted
+  }
+
+  def toElements(cluster: RDDOperationCluster, jobId: Int): Seq[Element] = {
+    val stageId = Try(cluster.id.replace("stage_", "").toInt).get
+    val rdds = allRdds(cluster)
+    rdds.map { op =>
+      val head = sc.scopeManager.getScope(op.id).getOrElse("").split('/').toSeq
+      Element(head, jobId, stageId, op)
+    }
+  }
+
+  def allRdds(c: RDDOperationCluster): Seq[RDDOperationNode] = {
+    c.childNodes ++ c.childClusters.flatMap(allRdds)
+  }
+
+  // Elements should be sorted
+  def elementsToGraph(elements: Seq[Element]): GraphDef = {
+    val createdNodes = elements.flatMap(e => rddCreationDir.get(e.rddId) match {
+      case Some(path) => None // Already built
+      case None =>
+        rddCreationDir += e.rddId -> e.dir
+        rddCreationPath += e.rddId -> e.path
+        val depRddIds = rddIdIncomingEdges.getOrElse(e.rddId, Nil)
+        val depRddPaths = depRddIds.flatMap(rddIds.get)
+        val deps = depRddPaths.flatMap(nodes.get)
+        val n = addNode0(TensorFlowListener.node(e.path, "RDD", deps,
+          "rdd_id" -> e.rddId,
+          "type" -> e.name,
+          "cached" -> e.op.cached,
+          "stage" -> e.stage,
+          "callsite" -> e.op.callsite.shortForm))
+        nodes += e.path -> n
+        rddNodes += e.rddId -> n
+        Some(n)
+    })
+    // Go in each directory and check the explained stage dependencies
+    val stageNodes = elements.groupBy(_.dir).toSeq.flatMap { case (dir, elems) =>
+      // Partition the rdds in this dir into the one we created and the ones we refer to.
+      val allIds = elems.map(_.rddId).toSet
+      val allDepIds = allIds.flatMap(rddIdIncomingEdges.getOrElse(_, Nil)).toSet
+      val createdIds = rddCreationDir.filter(_._2 == dir).keySet
+      val explainedDepIds = createdIds.flatMap(rddIdIncomingEdges.getOrElse(_, Nil)).toSet
+      val unexplainedDepIds = allDepIds -- (explainedDepIds ++ allIds)
+      val unexplainedDeps = unexplainedDepIds.toSeq.sorted.map(rddNodes.apply)
+      if (unexplainedDepIds.nonEmpty) {
+        Some(addNode0(TensorFlowListener.node(dir, "Stage", unexplainedDeps)))
+      } else None
+    }
+    val g = Graph.GraphDef.newBuilder()
+    g.addAllNode(createdNodes ++ stageNodes)
+    g.build()
+  }
+
   def addStageCluster(cluster: RDDOperationCluster, scope: String = ""): Unit = {
-    val p = s"$scope/${cluster.name}"
+    val stageName = cluster.name
+    // Do not show the stages
+    val p = s"$scope"
     rddClusterIds += cluster.id -> p
     // nodes first, then sub clusters
-    println(s"addStageCluster $p")
+
     // Find all the RDDs that are relevant to this stage:
     val stageRDDs = cluster.childClusters
       .sortBy(_.id) // This is the operation id, it should still give an ordering
-      .flatMap { c =>
-      assert(c.childClusters.isEmpty, s"$p ${c.id}")
-      val children = c.childNodes
-      assert(children.size <= 1, s"$p ${c.id} $children")
-      children.map { child =>
-        c.name -> child
-      }
-    } .toIndexedSeq
+    .flatMap(allRdds).distinct.sortBy(_.id)
+//      .flatMap { c =>
+////      assert(c.childClusters.isEmpty, s"$p ${c.id} ${c.childClusters}")
+//      val children = allRdds(c)
+////      val children = c.childNodes
+////      assert(children.size <= 1, s"$p ${c.id} $children")
+//      children.map { child =>
+//        c.name -> child
+//      }
+//    } .toIndexedSeq
+
     // Compact the representation: if some RDDs have already been created, just add a reference to them
-    val createdRDDs = stageRDDs.flatMap { case (name, rddOp) =>
+    val createdRDDs = stageRDDs.flatMap { rddOp =>
         if (rddIds.contains(rddOp.id)) {
           None
         } else {
           // Create a RDD node
-          val n = addNode1(rddOp, name, p)
+          val n = addNode1(rddOp, "noname", p)
           Some(rddOp.id -> n)
         }
     }
-    val allStageDeps = stageRDDs.flatMap { case (name, rddOp) =>
+    val allStageDeps = stageRDDs.flatMap { rddOp =>
         rddIdIncomingEdges.getOrElse(rddOp.id, Nil)
     } .toSet
     val explainedStageDeps = createdRDDs.map(_._1).flatMap(rddIdIncomingEdges.getOrElse(_, Nil)).toSet
     val unexplainedStageDepIds = (allStageDeps -- explainedStageDeps).toSeq.sorted
     val unexplainedStageDeps = unexplainedStageDepIds.flatMap(rddIds.get).flatMap(nodes.get)
+    println(s"addStageCluster $p stageRDD=${stageRDDs.map(_.id)} createRDDs=${createdRDDs.map(_._1)} allStageDeps=${allStageDeps} " +
+      s"explainedStageDeps=$explainedStageDeps unexplainedStageDepIds=$unexplainedStageDepIds " +
+      s"unexplainedStageDeps=$unexplainedStageDeps")
     if (unexplainedStageDeps.nonEmpty) {
       addNode0(TensorFlowListener.node(p, "Stage", unexplainedStageDeps))
     }
   }
 
-  def addGraph(graphs: Map[Int, Seq[RDDOperationGraph]], scope:String=""): Unit = {
-    addGraphs(graphs.toSeq.flatMap { case (jobId, seq) => seq.map(x => jobId -> x)}, scope)
+  def addGraph(graphs: Map[Int, Seq[RDDOperationGraph]], scope:String=""): Seq[Element] = {
+    val seqs = graphs.toSeq.flatMap { case (jobId, seq) => seq.map(x => jobId -> x)}
+    addGraphs(seqs, scope)
+    toElements(seqs)
   }
 
   def addGraphs(graphs: Seq[(Int, RDDOperationGraph)], scope:String="", depth: Int =0): Unit = {
