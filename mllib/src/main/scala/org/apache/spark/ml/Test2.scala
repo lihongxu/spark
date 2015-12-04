@@ -30,8 +30,10 @@ object Test2 {
   // Evaluate clustering by computing Within Set Sum of Squared Errors
   val WSSSE = clusters.computeCost(z)
 
-  val b = new GraphBuilder()
-  b.addGraph(tfl.rddops.getAllOperationGraphs, scope="repl")
+  val b = new GraphBuilder(sc)
+  b.addGraph(tfl.rddops.getAllOperationGraphs)
   tfl.writeGraph(b.build())
   tfl.stream1.flush()
+
+
 }

@@ -42,7 +42,7 @@ import org.apache.spark.{Logging, SparkContext}
  */
 @JsonInclude(Include.NON_NULL)
 @JsonPropertyOrder(Array("id", "name", "parent"))
-private[spark] class RDDOperationScope(
+class RDDOperationScope(
     val name: String,
     val parent: Option[RDDOperationScope] = None,
     val id: String = RDDOperationScope.nextScopeId().toString) {
@@ -95,7 +95,7 @@ private[spark] object RDDOperationScope extends Logging {
    *
    * Note: Return statements are NOT allowed in body.
    */
-  private[spark] def withScope[T](
+  def withScope[T](
       sc: SparkContext,
       allowNesting: Boolean = false)(body: => T): T = {
     val ourMethodName = "withScope"
@@ -124,7 +124,7 @@ private[spark] object RDDOperationScope extends Logging {
    *
    * Note: Return statements are NOT allowed in body.
    */
-  private[spark] def withScope[T](
+  def withScope[T](
       sc: SparkContext,
       name: String,
       allowNesting: Boolean,

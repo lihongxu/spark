@@ -211,6 +211,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   logInfo(s"Running Spark version $SPARK_VERSION")
 
   lazy val tfListener = new TensorFlowListener(getConf)
+  lazy val scopeManager = new ScopingManager(this)
 
   /* ------------------------------------------------------------------------------------- *
    | Private variables. These variables keep the internal state of the context, and are    |
@@ -278,6 +279,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
    * @return true if context is stopped or in the midst of stopping.
    */
   def isStopped: Boolean = stopped.get()
+
+  def scope[A](s: String)(f: => A): A = scopeManager.scope(s)(f)
 
   // An asynchronous listener bus for Spark events
   val listenerBus = new LiveListenerBus
