@@ -23,15 +23,15 @@ object TFTest {
   rdd1.groupBy(_.hashCode() % 10).mapValues(_.size).collect()
   rdd1.count()
   val b = new GraphBuilder(sc)
-  val x = b.addGraph(tfl.rddops.getAllOperationGraphs)
-  val g = b.elementsToGraph(x)
-  println(x)
+  val g = b.addGraph(tfl.rddops.getAllOperationGraphs)
   println(g)
-
-
-  println(b.build())
-  tfl.writeGraph(b.build())
+  tfl.writeGraph(g)
   tfl.stream1.flush()
+
+
+//  println(b.build())
+//  tfl.writeGraph(b.build())
+//  tfl.stream1.flush()
 
   RDDOperationGraph.makeDotFile(tfl.rddops.getOperationGraphForJob(0).head)
 
@@ -62,9 +62,9 @@ object TFTest2 {
   rdd1.groupBy(_.hashCode() % 10).mapValues(_.size).collect()
   rdd2.count()
   val b = new GraphBuilder(sc)
-  b.addGraph(tfl.rddops.getAllOperationGraphs)
-  println(b.build())
-  tfl.writeGraph(b.build())
+  val g = b.addGraph(tfl.rddops.getAllOperationGraphs)
+//  println(b.build())
+  tfl.writeGraph(g)
   tfl.stream1.flush()
 
   RDDOperationGraph.makeDotFile(tfl.rddops.getOperationGraphForJob(0).head)

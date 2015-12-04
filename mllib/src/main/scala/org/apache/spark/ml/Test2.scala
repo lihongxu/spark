@@ -31,8 +31,8 @@ object Test2 {
   val WSSSE = clusters.computeCost(z)
 
   val b = new GraphBuilder(sc)
-  b.addGraph(tfl.rddops.getAllOperationGraphs)
-  tfl.writeGraph(b.build())
+  val g = b.addGraph(tfl.rddops.getAllOperationGraphs)
+  tfl.writeGraph(g)
   tfl.stream1.flush()
 
 
