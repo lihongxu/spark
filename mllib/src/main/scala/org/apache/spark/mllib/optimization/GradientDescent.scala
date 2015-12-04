@@ -122,7 +122,7 @@ class GradientDescent private[spark] (private var gradient: Gradient, private va
    * @return solution vector
    */
   @DeveloperApi
-  def optimize(data: RDD[(Double, Vector)], initialWeights: Vector): Vector = {
+  def optimize(data: RDD[(Double, Vector)], initialWeights: Vector): Vector = data.sparkContext.scope("GradientDescent") {
     val (weights, _) = GradientDescent.runMiniBatchSGD(
       data,
       gradient,
@@ -217,7 +217,7 @@ object GradientDescent extends Logging {
 
     var converged = false // indicates whether converged based on convergenceTol
     var i = 1
-    while (!converged && i <= numIterations) {
+    while (!converged && i <= numIterations) data.sparkContext.scope(s"iteration-$i") {
       val bcWeights = data.context.broadcast(weights)
       // Sample a subset (fraction miniBatchFraction) of the total data
       // compute and sum up the subgradients on this subset (this is one map-reduce)

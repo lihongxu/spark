@@ -245,7 +245,7 @@ object SVMWithSGD {
    * @return a SVMModel which has the weights and offset from training.
    */
   @Since("0.8.0")
-  def train(input: RDD[LabeledPoint], numIterations: Int): SVMModel = {
+  def train(input: RDD[LabeledPoint], numIterations: Int): SVMModel = input.sparkContext.scope("SVM") {
     train(input, numIterations, 1.0, 0.01, 1.0)
   }
 }
