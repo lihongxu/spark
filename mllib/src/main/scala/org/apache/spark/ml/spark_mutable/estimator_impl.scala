@@ -1,4 +1,4 @@
-package org.apache.spark.ml.spark2
+package org.apache.spark.ml.spark_mutable
 
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.sql.DataFrame

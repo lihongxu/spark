@@ -1,4 +1,4 @@
-package org.apache.spark.ml.spark3
+package org.apache.spark.ml.spark_immutable
 
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.sql.DataFrame

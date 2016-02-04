@@ -1,4 +1,4 @@
-package org.apache.spark.ml.spark2
+package org.apache.spark.ml.spark_mutable
 
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.sql.DataFrame
@@ -47,7 +47,7 @@ trait Estimator[T <: Estimator[T]] extends Transformer[T] {
    * @param data
    * @return
    */
-  def fit(data: DataFrame): FittingResult
+  def fit(data: DataFrame): Unit
 
   /**
    * Stops the fitting procedure.
@@ -55,7 +55,7 @@ trait Estimator[T <: Estimator[T]] extends Transformer[T] {
    * After this method returns, the fitting procedure is guaranteed to have terminated.
    * @return
    */
-  def stopFit(): FittingResult
+  def stopFit(): Unit
 
   // Make clear that copy() will return something that can be fit again
 
@@ -68,3 +68,34 @@ trait Estimator[T <: Estimator[T]] extends Transformer[T] {
 }
 
 
+// Separate the pipeline into transformer pipelines (for which fit() is a no-op) and EstimatorPipeline
+trait TransformerPipeline extends Transformer[TransformerPipeline] {
+  def stages: Seq[Transformer[_]] = ???
+}
+
+object TransformerPipeline {
+  def apply(stages: Transformer[_]*): TransformerPipeline = ???
+}
+
+trait EstimatorPipeline extends Estimator[EstimatorPipeline]{
+
+  //
+  def stages: Seq[Either[Transformer[_], Estimator[_]]] = ???
+
+  override def fit(df: DataFrame): Unit = {
+    var data = df
+    stages.foreach {
+      case m: Estimator[_] =>
+        m.fit(data)
+        data = m.transform(data)
+      case m: Transformer[_] =>
+        data = m.transform(data)
+    }
+  }
+}
+
+object EstimatorPipeline {
+  def apply(stages: Transformer[_]*): EstimatorPipeline = {
+    ???
+  }
+}
