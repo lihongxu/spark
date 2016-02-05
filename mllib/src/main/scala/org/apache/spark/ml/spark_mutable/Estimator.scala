@@ -85,10 +85,10 @@ trait EstimatorPipeline extends Estimator[EstimatorPipeline]{
   override def fit(df: DataFrame): Unit = {
     var data = df
     stages.foreach {
-      case m: Estimator[_] =>
+      case Right(m) =>
         m.fit(data)
         data = m.transform(data)
-      case m: Transformer[_] =>
+      case Left(m) =>
         data = m.transform(data)
     }
   }

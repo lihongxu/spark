@@ -8,6 +8,7 @@ import org.apache.spark.ml.feature.Word2Vec
 import org.apache.spark.sql.DataFrame
 
 import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * Created by tjhunter on 2/4/16.
@@ -54,17 +55,11 @@ object experiments {
   {
     // Fitting happens in place:
     val p: Pipeline = new Pipeline().setStages(Array(est, transformer))
-    // Will change est
-    p.fit(training_input1)
+    // Will not change est
+    val mod = p.fit(training_input1)
+    mod.transform(eval_data)
   }
 
   // *** Pipeline without refitting the elements already fit ***
-  {
-    // Need to wrap the fitter within a transformer pipeline
-    val p: TransformerPipeline = TransformerPipeline(transformer, est)
-    val est2 = new NaiveBayes()
-    val biggedP: EstimatorPipeline = EstimatorPipeline(p, est2)
-    // This will fit est2 but not est
-    biggedP.fit(training_input1)
-  }
+  // Not sure how to do it currently
 }

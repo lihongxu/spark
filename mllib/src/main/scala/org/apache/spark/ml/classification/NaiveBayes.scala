@@ -23,7 +23,6 @@ import org.apache.spark.SparkException
 import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.PredictorParams
 import org.apache.spark.ml.param.{DoubleParam, Param, ParamMap, ParamValidators}
-import org.apache.spark.ml.spark_mutable.Estimator
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.classification.{NaiveBayes => OldNaiveBayes}
 import org.apache.spark.mllib.classification.{NaiveBayesModel => OldNaiveBayesModel}
@@ -77,7 +76,7 @@ private[ml] trait NaiveBayesParams extends PredictorParams {
 @Experimental
 class NaiveBayes @Since("1.5.0") (
     @Since("1.5.0") override val uid: String)
-  extends Estimator[NaiveBayes]
+  extends ProbabilisticClassifier[Vector, NaiveBayes, NaiveBayesModel]
   with NaiveBayesParams with DefaultParamsWritable {
 
   @Since("1.5.0")
@@ -90,9 +89,26 @@ class NaiveBayes @Since("1.5.0") (
    */
   @Since("1.5.0")
   def setSmoothing(value: Double): this.type = set(smoothing, value)
+  setDefault(smoothing -> 1.0)
 
-  def fit(x: DataFrame): Unit = {}
+  /**
+   * Set the model type using a string (case-sensitive).
+   * Supported options: "multinomial" and "bernoulli".
+   * Default is "multinomial"
+   * @group setParam
+   */
+  @Since("1.5.0")
+  def setModelType(value: String): this.type = set(modelType, value)
+  setDefault(modelType -> OldNaiveBayes.Multinomial)
 
+  override protected def train(dataset: DataFrame): NaiveBayesModel = {
+    val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset)
+    val oldModel = OldNaiveBayes.train(oldDataset, $(smoothing), $(modelType))
+    NaiveBayesModel.fromOld(oldModel, this)
+  }
+
+  @Since("1.5.0")
+  override def copy(extra: ParamMap): NaiveBayes = defaultCopy(extra)
 }
 
 @Since("1.6.0")

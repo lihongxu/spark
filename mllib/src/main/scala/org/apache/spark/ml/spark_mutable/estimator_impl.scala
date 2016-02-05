@@ -135,7 +135,7 @@ abstract class EstimatorWithState[State, T <: AbstractEstimator[T]] extends Abst
 
   // **** Implementation of the public methods ****
 
-  override def fit(data: DataFrame): FittingResult = {
+  override def fit(data: DataFrame): Unit = {
     // We could add the stack call of the other procedure doing the fit.
     lock.synchronized {
       require(fittingState == ReadyToFit, "This estimator is already in the process of fitting")
@@ -174,7 +174,7 @@ abstract class EstimatorWithState[State, T <: AbstractEstimator[T]] extends Abst
     lastFittingResult.get
   }
 
-  override def stopFit(): FittingResult = {
+  override def stopFit(): Unit = {
     lock.synchronized {
       require(fittingState != ReadyToFit, "Not currently fitting")
     }
