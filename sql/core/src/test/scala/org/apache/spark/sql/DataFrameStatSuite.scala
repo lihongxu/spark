@@ -298,7 +298,7 @@ class DataFrameStatPerfSuite extends QueryTest with SharedSQLContext {
   private def toLetter(i: Int): String = (i + 97).toChar.toString
 
   test("describe() should not be slowed down too much by quantiles") {
-    val df = sqlContext.range(1000000L).toDF("col1")
+    val df = sqlContext.range(5000000L).toDF("col1")
     def millis(f: => Any): Double = {
       // Do some warmup
       for (i <- 1 to 10) {
@@ -317,6 +317,7 @@ class DataFrameStatPerfSuite extends QueryTest with SharedSQLContext {
 
     println("*** Normal describe ***")
     val t1 = millis { df.describe() }
+    println(s"T1 = $t1")
     println("*** Just quantiles ***")
     val t2 = millis { StatFunctions.multipleApproxQuantiles(df, Seq("col1"), Seq(0.1, 0.25, 0.5, 0.75, 0.9), 0.01) }
     println(s"T1 = $t1, T2 = $t2")
