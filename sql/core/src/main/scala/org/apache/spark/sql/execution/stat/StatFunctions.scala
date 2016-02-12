@@ -38,10 +38,54 @@ private[sql] object StatFunctions extends Logging {
       col: String,
       quantile: Double,
       epsilon: Double = QuantileSummaries.defaultEpsilon): Double = {
-    // TODO: allow the extrema, they are stored in the statistics
-    require(quantile > 0.0 && quantile < 1.0, "Quantile must be in the range of (0.0, 1.0).")
+    require(quantile >= 0.0 && quantile <= 1.0, "Quantile must be in the range of (0.0, 1.0).")
     val summaries = collectQuantileSummaries(df, col, epsilon)
     summaries.query(quantile)
+  }
+
+  def approxQuantiles(
+      df: DataFrame,
+      col: String,
+      quantiles: Array[Double],
+      epsilon: Double): Array[Double] = {
+    require(quantiles.min >= 0.0 && quantiles.max <= 1.0, "Quantile must be in the range of (0.0, 1.0).")
+    val summaries = collectQuantileSummaries(df, col, epsilon)
+    quantiles.map(summaries.query)
+  }
+
+  /**
+   * For efficiency, runs multiple quantile computations in a single pass.
+   * @param df the dataframe
+   * @param cols columns of the dataframe
+   * @param quantiles target quantiles to compute
+   * @param epsilon the precision to achieve
+   * @return for each column, returns the requested approximations
+   */
+  def multipleApproxQuantiles(df: DataFrame, cols: Seq[String], quantiles: Seq[Double], epsilon: Double): Seq[Seq[Double]] = {
+    val columns: Seq[Column] = cols.map { colName =>
+      val field = df.schema(colName)
+      require(field.dataType.isInstanceOf[NumericType],
+        s"Quantile calculation for column $colName with data type ${field.dataType} is not supported.")
+      Column(Cast(Column(colName).expr, DoubleType))
+    }
+    val emptySummaries = Array.fill(cols.size)(
+      new QuantileSummaries(QuantileSummaries.defaultCompressThreshold, epsilon))
+
+    def apply(summaries: Array[QuantileSummaries], row: Row): Array[QuantileSummaries] = {
+      var i = 0
+      while (i < summaries.length) {
+        summaries(i).insert(row.getDouble(i))
+        i += 1
+      }
+      summaries
+    }
+
+    def merge(sum1: Array[QuantileSummaries], sum2: Array[QuantileSummaries]): Array[QuantileSummaries] = {
+      sum1.zip(sum2).map { case (s1, s2) => s1.merge(s2) }
+    }
+    val summaries = df.select(columns: _*).rdd.aggregate(emptySummaries)(apply, merge)
+
+    summaries.map { summary => quantiles.map(summary.query) }
   }
 
   private def collectQuantileSummaries(
@@ -75,10 +119,6 @@ private[sql] object StatFunctions extends Logging {
       val epsilon: Double,
       val sampled: ArrayBuffer[Stats] = ArrayBuffer.empty,
       private var count: Long = 0L) extends Serializable {
-
-//
-//    val sampled = new ArrayBuffer[Stats]() // sampled examples
-//    var count = 0L // count of observed examples
 
     private def getConstant(): Double = 2 * epsilon * count
 
@@ -153,7 +193,7 @@ private[sql] object StatFunctions extends Logging {
       res.prepend(head)
       // If necessary, add the minimum element:
       res.prepend(currentSamples.head)
-      println(s"compressImmut: threshold=$mergeThreshold, \nbefore=${printBuffer(currentSamples)}\nafter=${printBuffer(res)}")
+//      println(s"compressImmut: threshold=$mergeThreshold, \nbefore=${printBuffer(currentSamples)}\nafter=${printBuffer(res)}")
       res
     }
 
@@ -242,7 +282,7 @@ private[sql] object StatFunctions extends Logging {
         val curSample = sampled(i)
         minRank += curSample.g
         val maxRank = minRank + curSample.delta
-        println(s"bracket $i: minRank=$minRank maxRank=$maxRank")
+//        println(s"bracket $i: minRank=$minRank maxRank=$maxRank")
         if (maxRank - targetError <= rank && rank <= minRank + targetError) {
           return curSample.value
         }
