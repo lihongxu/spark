@@ -129,6 +129,11 @@ private[sql] object StatFunctions extends Logging {
 
     private def getConstant(): Double = 2 * epsilon * count
 
+    /**
+     * Inserts a new element into the quantile data structure.
+     * @param x
+     * @return a pointer to this data structure, or a different one if compression happened.
+     */
     def insert(x: Double): QuantileSummaries = {
       recentlySampled.append(x)
       if (recentlySampled.size >= compressThreshold) {
@@ -154,7 +159,10 @@ private[sql] object StatFunctions extends Logging {
       this
     }
 
-    // Compresses the data. If the data got compressed, it is going to return a new object.
+    /**
+     * Forces the compression of the quantiles: takes
+     * @return
+     */
     def compress(): QuantileSummaries = {
       if (recentlySampled.isEmpty) {
         val mergeThreshold = 2 * epsilon * count
