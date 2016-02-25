@@ -31,6 +31,7 @@ import com.esotericsoftware.kryo.io.Output;
 
 import org.apache.spark.unsafe.Platform;
 import org.apache.spark.unsafe.array.ByteArrayMethods;
+import org.apache.spark.unsafe.hash.Murmur3_x86_32;
 
 import static org.apache.spark.unsafe.Platform.*;
 
@@ -900,9 +901,9 @@ public final class UTF8String implements Comparable<UTF8String>, Externalizable,
       m = swap;
     }
 
-    int p[] = new int[n + 1];
-    int d[] = new int[n + 1];
-    int swap[];
+    int[] p = new int[n + 1];
+    int[] d = new int[n + 1];
+    int[] swap;
 
     int i, i_bytes, j, j_bytes, num_bytes_j, cost;
 
@@ -935,11 +936,7 @@ public final class UTF8String implements Comparable<UTF8String>, Externalizable,
 
   @Override
   public int hashCode() {
-    int result = 1;
-    for (int i = 0; i < numBytes; i ++) {
-      result = 31 * result + getByte(i);
-    }
-    return result;
+    return Murmur3_x86_32.hashUnsafeBytes(base, offset, numBytes, 42);
   }
 
   /**
@@ -965,7 +962,7 @@ public final class UTF8String implements Comparable<UTF8String>, Externalizable,
       // first character must be a letter
       return this;
     }
-    byte sx[] = {'0', '0', '0', '0'};
+    byte[] sx = {'0', '0', '0', '0'};
     sx[0] = b;
     int sxi = 1;
     int idx = b - 'A';

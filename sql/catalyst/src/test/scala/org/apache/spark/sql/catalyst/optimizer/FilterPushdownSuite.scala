@@ -18,13 +18,13 @@
 package org.apache.spark.sql.catalyst.optimizer
 
 import org.apache.spark.sql.catalyst.analysis
-import org.apache.spark.sql.catalyst.analysis.EliminateSubQueries
-import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.plans.{LeftSemi, PlanTest, LeftOuter, RightOuter}
-import org.apache.spark.sql.catalyst.rules._
-import org.apache.spark.sql.catalyst.dsl.plans._
+import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.dsl.expressions._
+import org.apache.spark.sql.catalyst.dsl.plans._
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.plans.{LeftOuter, LeftSemi, PlanTest, RightOuter}
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.rules._
 import org.apache.spark.sql.types.IntegerType
 
 class FilterPushdownSuite extends PlanTest {
@@ -32,7 +32,7 @@ class FilterPushdownSuite extends PlanTest {
   object Optimize extends RuleExecutor[LogicalPlan] {
     val batches =
       Batch("Subqueries", Once,
-        EliminateSubQueries) ::
+        EliminateSubqueryAliases) ::
       Batch("Filter Pushdown", Once,
         SamplePushDown,
         CombineFilters,
@@ -42,7 +42,7 @@ class FilterPushdownSuite extends PlanTest {
         PushPredicateThroughGenerate,
         PushPredicateThroughAggregate,
         ColumnPruning,
-        ProjectCollapsing) :: Nil
+        CollapseProject) :: Nil
   }
 
   val testRelation = LocalRelation('a.int, 'b.int, 'c.int)
@@ -75,8 +75,7 @@ class FilterPushdownSuite extends PlanTest {
     val correctAnswer =
       testRelation
         .select('a)
-        .groupBy('a)('a)
-        .select('a).analyze
+        .groupBy('a)('a).analyze
 
     comparePlans(optimized, correctAnswer)
   }
@@ -91,8 +90,7 @@ class FilterPushdownSuite extends PlanTest {
     val correctAnswer =
       testRelation
         .select('a)
-        .groupBy('a)('a as 'c)
-        .select('c).analyze
+        .groupBy('a)('a as 'c).analyze
 
     comparePlans(optimized, correctAnswer)
   }
@@ -483,7 +481,7 @@ class FilterPushdownSuite extends PlanTest {
     }
     val optimized = Optimize.execute(originalQuery.analyze)
 
-    comparePlans(analysis.EliminateSubQueries(originalQuery.analyze), optimized)
+    comparePlans(analysis.EliminateSubqueryAliases(originalQuery.analyze), optimized)
   }
 
   test("joins: conjunctive predicates") {
@@ -502,7 +500,7 @@ class FilterPushdownSuite extends PlanTest {
       left.join(right, condition = Some("x.b".attr === "y.b".attr))
         .analyze
 
-    comparePlans(optimized, analysis.EliminateSubQueries(correctAnswer))
+    comparePlans(optimized, analysis.EliminateSubqueryAliases(correctAnswer))
   }
 
   test("joins: conjunctive predicates #2") {
@@ -521,7 +519,7 @@ class FilterPushdownSuite extends PlanTest {
       left.join(right, condition = Some("x.b".attr === "y.b".attr))
         .analyze
 
-    comparePlans(optimized, analysis.EliminateSubQueries(correctAnswer))
+    comparePlans(optimized, analysis.EliminateSubqueryAliases(correctAnswer))
   }
 
   test("joins: conjunctive predicates #3") {
@@ -545,7 +543,7 @@ class FilterPushdownSuite extends PlanTest {
           condition = Some("z.a".attr === "x.b".attr))
         .analyze
 
-    comparePlans(optimized, analysis.EliminateSubQueries(correctAnswer))
+    comparePlans(optimized, analysis.EliminateSubqueryAliases(correctAnswer))
   }
 
   val testRelationWithArrayType = LocalRelation('a.int, 'b.int, 'c_arr.array(IntegerType))
@@ -621,7 +619,7 @@ class FilterPushdownSuite extends PlanTest {
       x.select('a)
        .sortBy(SortOrder('a, Ascending)).analyze
 
-    comparePlans(optimized, analysis.EliminateSubQueries(correctAnswer))
+    comparePlans(optimized, analysis.EliminateSubqueryAliases(correctAnswer))
 
     // push down invalid
     val originalQuery1 = {
@@ -636,20 +634,21 @@ class FilterPushdownSuite extends PlanTest {
        .sortBy(SortOrder('a, Ascending))
        .select('b).analyze
 
-    comparePlans(optimized1, analysis.EliminateSubQueries(correctAnswer1))
+    comparePlans(optimized1, analysis.EliminateSubqueryAliases(correctAnswer1))
   }
 
   test("push project and filter down into sample") {
     val x = testRelation.subquery('x)
     val originalQuery =
-      Sample(0.0, 0.6, false, 11L, x).select('a)
+      Sample(0.0, 0.6, false, 11L, x)().select('a)
 
-    val originalQueryAnalyzed = EliminateSubQueries(analysis.SimpleAnalyzer.execute(originalQuery))
+    val originalQueryAnalyzed =
+      EliminateSubqueryAliases(analysis.SimpleAnalyzer.execute(originalQuery))
 
     val optimized = Optimize.execute(originalQueryAnalyzed)
 
     val correctAnswer =
-      Sample(0.0, 0.6, false, 11L, x.select('a))
+      Sample(0.0, 0.6, false, 11L, x.select('a))()
 
     comparePlans(optimized, correctAnswer.analyze)
   }
@@ -694,6 +693,59 @@ class FilterPushdownSuite extends PlanTest {
                         .groupBy('a)('a, count('b) as 'c)
                         .where('c === 2L)
                         .analyze
+
+    comparePlans(optimized, correctAnswer)
+  }
+
+  test("aggregate: push down filters with alias") {
+    val originalQuery = testRelation
+      .select('a, 'b)
+      .groupBy('a)(('a + 1) as 'aa, count('b) as 'c)
+      .where(('c === 2L || 'aa > 4) && 'aa < 3)
+
+    val optimized = Optimize.execute(originalQuery.analyze)
+
+    val correctAnswer = testRelation
+      .select('a, 'b)
+      .where('a + 1 < 3)
+      .groupBy('a)(('a + 1) as 'aa, count('b) as 'c)
+      .where('c === 2L || 'aa > 4)
+      .analyze
+
+    comparePlans(optimized, correctAnswer)
+  }
+
+  test("aggregate: push down filters with literal") {
+    val originalQuery = testRelation
+      .select('a, 'b)
+      .groupBy('a)('a, count('b) as 'c, "s" as 'd)
+      .where('c === 2L && 'd === "s")
+
+    val optimized = Optimize.execute(originalQuery.analyze)
+
+    val correctAnswer = testRelation
+      .select('a, 'b)
+      .where("s" === "s")
+      .groupBy('a)('a, count('b) as 'c, "s" as 'd)
+      .where('c === 2L)
+      .analyze
+
+    comparePlans(optimized, correctAnswer)
+  }
+
+  test("aggregate: don't push down filters that are nondeterministic") {
+    val originalQuery = testRelation
+      .select('a, 'b)
+      .groupBy('a)('a + Rand(10) as 'aa, count('b) as 'c, Rand(11).as("rnd"))
+      .where('c === 2L && 'aa + Rand(10).as("rnd") === 3 && 'rnd === 5)
+
+    val optimized = Optimize.execute(originalQuery.analyze)
+
+    val correctAnswer = testRelation
+      .select('a, 'b)
+      .groupBy('a)('a + Rand(10) as 'aa, count('b) as 'c, Rand(11).as("rnd"))
+      .where('c === 2L && 'aa + Rand(10).as("rnd") === 3 && 'rnd === 5)
+      .analyze
 
     comparePlans(optimized, correctAnswer)
   }

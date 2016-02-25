@@ -20,7 +20,7 @@ package org.apache.spark.sql.execution
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
 
 /**
  * The primary workflow for executing relational queries using Spark.  Designed to allow easy
@@ -42,10 +42,9 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   lazy val optimizedPlan: LogicalPlan = sqlContext.optimizer.execute(withCachedData)
 
-  // TODO: Don't just pick the first one...
   lazy val sparkPlan: SparkPlan = {
-    SparkPlan.currentContext.set(sqlContext)
-    sqlContext.planner.plan(optimizedPlan).next()
+    SQLContext.setActive(sqlContext)
+    sqlContext.planner.plan(ReturnAnswer(optimizedPlan)).next()
   }
 
   // executedPlan should not be used to initialize any SparkPlan. It should be

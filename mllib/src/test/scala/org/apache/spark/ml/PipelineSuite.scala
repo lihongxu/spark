@@ -17,20 +17,19 @@
 
 package org.apache.spark.ml
 
-import java.io.File
-
 import scala.collection.JavaConverters._
 
-import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.fs.Path
 import org.mockito.Matchers.{any, eq => meq}
 import org.mockito.Mockito.when
 import org.scalatest.mock.MockitoSugar.mock
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.ml.Pipeline.SharedReadWrite
-import org.apache.spark.ml.feature.HashingTF
+import org.apache.spark.ml.feature.{HashingTF, MinMaxScaler}
 import org.apache.spark.ml.param.{IntParam, ParamMap}
 import org.apache.spark.ml.util._
+import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.types.StructType
@@ -176,11 +175,31 @@ class PipelineSuite extends SparkFunSuite with MLlibTestSparkContext with Defaul
       }
     }
   }
+
+  test("pipeline validateParams") {
+    val df = sqlContext.createDataFrame(
+      Seq(
+        (1, Vectors.dense(0.0, 1.0, 4.0), 1.0),
+        (2, Vectors.dense(1.0, 0.0, 4.0), 2.0),
+        (3, Vectors.dense(1.0, 0.0, 5.0), 3.0),
+        (4, Vectors.dense(0.0, 0.0, 5.0), 4.0))
+    ).toDF("id", "features", "label")
+
+    intercept[IllegalArgumentException] {
+       val scaler = new MinMaxScaler()
+         .setInputCol("features")
+         .setOutputCol("features_scaled")
+         .setMin(10)
+         .setMax(0)
+       val pipeline = new Pipeline().setStages(Array(scaler))
+       pipeline.fit(df)
+    }
+  }
 }
 
 
-/** Used to test [[Pipeline]] with [[Writable]] stages */
-class WritableStage(override val uid: String) extends Transformer with Writable {
+/** Used to test [[Pipeline]] with [[MLWritable]] stages */
+class WritableStage(override val uid: String) extends Transformer with MLWritable {
 
   final val intParam: IntParam = new IntParam(this, "intParam", "doc")
 
@@ -192,21 +211,21 @@ class WritableStage(override val uid: String) extends Transformer with Writable 
 
   override def copy(extra: ParamMap): WritableStage = defaultCopy(extra)
 
-  override def write: Writer = new DefaultParamsWriter(this)
+  override def write: MLWriter = new DefaultParamsWriter(this)
 
   override def transform(dataset: DataFrame): DataFrame = dataset
 
   override def transformSchema(schema: StructType): StructType = schema
 }
 
-object WritableStage extends Readable[WritableStage] {
+object WritableStage extends MLReadable[WritableStage] {
 
-  override def read: Reader[WritableStage] = new DefaultParamsReader[WritableStage]
+  override def read: MLReader[WritableStage] = new DefaultParamsReader[WritableStage]
 
-  override def load(path: String): WritableStage = read.load(path)
+  override def load(path: String): WritableStage = super.load(path)
 }
 
-/** Used to test [[Pipeline]] with non-[[Writable]] stages */
+/** Used to test [[Pipeline]] with non-[[MLWritable]] stages */
 class UnWritableStage(override val uid: String) extends Transformer {
 
   final val intParam: IntParam = new IntParam(this, "intParam", "doc")

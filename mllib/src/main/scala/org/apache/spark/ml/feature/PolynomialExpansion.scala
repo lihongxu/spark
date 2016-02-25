@@ -19,9 +19,9 @@ package org.apache.spark.ml.feature
 
 import scala.collection.mutable
 
-import org.apache.spark.annotation.{Since, Experimental}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.UnaryTransformer
-import org.apache.spark.ml.param.{ParamMap, IntParam, ParamValidators}
+import org.apache.spark.ml.param.{IntParam, ParamMap, ParamValidators}
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.linalg._
 import org.apache.spark.sql.types.DataType
@@ -36,7 +36,7 @@ import org.apache.spark.sql.types.DataType
  */
 @Experimental
 class PolynomialExpansion(override val uid: String)
-  extends UnaryTransformer[Vector, Vector, PolynomialExpansion] with Writable {
+  extends UnaryTransformer[Vector, Vector, PolynomialExpansion] with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("poly"))
 
@@ -46,7 +46,7 @@ class PolynomialExpansion(override val uid: String)
    * @group param
    */
   val degree = new IntParam(this, "degree", "the polynomial degree to expand (>= 1)",
-    ParamValidators.gt(1))
+    ParamValidators.gtEq(1))
 
   setDefault(degree -> 2)
 
@@ -63,9 +63,6 @@ class PolynomialExpansion(override val uid: String)
   override protected def outputDataType: DataType = new VectorUDT()
 
   override def copy(extra: ParamMap): PolynomialExpansion = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 /**
@@ -81,7 +78,7 @@ class PolynomialExpansion(override val uid: String)
  * current index and increment it properly for sparse input.
  */
 @Since("1.6.0")
-object PolynomialExpansion extends Readable[PolynomialExpansion] {
+object PolynomialExpansion extends DefaultParamsReadable[PolynomialExpansion] {
 
   private def choose(n: Int, k: Int): Int = {
     Range(n, n - k, -1).product / Range(k, 1, -1).product
@@ -182,8 +179,5 @@ object PolynomialExpansion extends Readable[PolynomialExpansion] {
   }
 
   @Since("1.6.0")
-  override def read: Reader[PolynomialExpansion] = new DefaultParamsReader[PolynomialExpansion]
-
-  @Since("1.6.0")
-  override def load(path: String): PolynomialExpansion = read.load(path)
+  override def load(path: String): PolynomialExpansion = super.load(path)
 }

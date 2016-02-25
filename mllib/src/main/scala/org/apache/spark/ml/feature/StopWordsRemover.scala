@@ -17,7 +17,7 @@
 
 package org.apache.spark.ml.feature
 
-import org.apache.spark.annotation.{Since, Experimental}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.param.{BooleanParam, ParamMap, StringArrayParam}
 import org.apache.spark.ml.param.shared.{HasInputCol, HasOutputCol}
@@ -86,7 +86,7 @@ private[spark] object StopWords {
  */
 @Experimental
 class StopWordsRemover(override val uid: String)
-  extends Transformer with HasInputCol with HasOutputCol with Writable {
+  extends Transformer with HasInputCol with HasOutputCol with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("stopWords"))
 
@@ -145,26 +145,19 @@ class StopWordsRemover(override val uid: String)
   }
 
   override def transformSchema(schema: StructType): StructType = {
+    validateParams()
     val inputType = schema($(inputCol)).dataType
     require(inputType.sameType(ArrayType(StringType)),
       s"Input type must be ArrayType(StringType) but got $inputType.")
-    val outputFields = schema.fields :+
-      StructField($(outputCol), inputType, schema($(inputCol)).nullable)
-    StructType(outputFields)
+    SchemaUtils.appendColumn(schema, $(outputCol), inputType, schema($(inputCol)).nullable)
   }
 
   override def copy(extra: ParamMap): StopWordsRemover = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 @Since("1.6.0")
-object StopWordsRemover extends Readable[StopWordsRemover] {
+object StopWordsRemover extends DefaultParamsReadable[StopWordsRemover] {
 
   @Since("1.6.0")
-  override def read: Reader[StopWordsRemover] = new DefaultParamsReader[StopWordsRemover]
-
-  @Since("1.6.0")
-  override def load(path: String): StopWordsRemover = read.load(path)
+  override def load(path: String): StopWordsRemover = super.load(path)
 }

@@ -17,7 +17,7 @@
 
 package org.apache.spark.ml.feature
 
-import org.apache.spark.annotation.{Since, Experimental}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.attribute.AttributeGroup
 import org.apache.spark.ml.param.{IntParam, ParamMap, ParamValidators}
@@ -34,7 +34,7 @@ import org.apache.spark.sql.types.{ArrayType, StructType}
  */
 @Experimental
 class HashingTF(override val uid: String)
-  extends Transformer with HasInputCol with HasOutputCol with Writable {
+  extends Transformer with HasInputCol with HasOutputCol with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("hashingTF"))
 
@@ -69,6 +69,7 @@ class HashingTF(override val uid: String)
   }
 
   override def transformSchema(schema: StructType): StructType = {
+    validateParams()
     val inputType = schema($(inputCol)).dataType
     require(inputType.isInstanceOf[ArrayType],
       s"The input column must be ArrayType, but got $inputType.")
@@ -77,17 +78,11 @@ class HashingTF(override val uid: String)
   }
 
   override def copy(extra: ParamMap): HashingTF = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 @Since("1.6.0")
-object HashingTF extends Readable[HashingTF] {
+object HashingTF extends DefaultParamsReadable[HashingTF] {
 
   @Since("1.6.0")
-  override def read: Reader[HashingTF] = new DefaultParamsReader[HashingTF]
-
-  @Since("1.6.0")
-  override def load(path: String): HashingTF = read.load(path)
+  override def load(path: String): HashingTF = super.load(path)
 }

@@ -17,11 +17,11 @@
 
 package org.apache.spark.ml.feature
 
-import org.apache.spark.annotation.{Since, Experimental}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.attribute.{Attribute, AttributeGroup}
-import org.apache.spark.ml.param.shared.{HasInputCol, HasOutputCol}
 import org.apache.spark.ml.param.{IntArrayParam, ParamMap, StringArrayParam}
+import org.apache.spark.ml.param.shared.{HasInputCol, HasOutputCol}
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.linalg._
 import org.apache.spark.sql.DataFrame
@@ -42,7 +42,7 @@ import org.apache.spark.sql.types.StructType
  */
 @Experimental
 final class VectorSlicer(override val uid: String)
-  extends Transformer with HasInputCol with HasOutputCol with Writable {
+  extends Transformer with HasInputCol with HasOutputCol with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("vectorSlicer"))
 
@@ -139,6 +139,7 @@ final class VectorSlicer(override val uid: String)
   }
 
   override def transformSchema(schema: StructType): StructType = {
+    validateParams()
     SchemaUtils.checkColumnType(schema, $(inputCol), new VectorUDT)
 
     if (schema.fieldNames.contains($(outputCol))) {
@@ -151,13 +152,10 @@ final class VectorSlicer(override val uid: String)
   }
 
   override def copy(extra: ParamMap): VectorSlicer = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 @Since("1.6.0")
-object VectorSlicer extends Readable[VectorSlicer] {
+object VectorSlicer extends DefaultParamsReadable[VectorSlicer] {
 
   /** Return true if given feature indices are valid */
   private[feature] def validIndices(indices: Array[Int]): Boolean = {
@@ -174,8 +172,5 @@ object VectorSlicer extends Readable[VectorSlicer] {
   }
 
   @Since("1.6.0")
-  override def read: Reader[VectorSlicer] = new DefaultParamsReader[VectorSlicer]
-
-  @Since("1.6.0")
-  override def load(path: String): VectorSlicer = read.load(path)
+  override def load(path: String): VectorSlicer = super.load(path)
 }

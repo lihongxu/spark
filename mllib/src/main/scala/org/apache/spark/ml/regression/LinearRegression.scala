@@ -25,9 +25,9 @@ import breeze.stats.distributions.StudentsT
 import org.apache.hadoop.fs.Path
 
 import org.apache.spark.{Logging, SparkException}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.feature.Instance
 import org.apache.spark.ml.optim.WeightedLeastSquares
-import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.PredictorParams
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.param.shared._
@@ -66,7 +66,7 @@ private[regression] trait LinearRegressionParams extends PredictorParams
 @Experimental
 class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String)
   extends Regressor[Vector, LinearRegression, LinearRegressionModel]
-  with LinearRegressionParams with Writable with Logging {
+  with LinearRegressionParams with DefaultParamsWritable with Logging {
 
   @Since("1.4.0")
   def this() = this(Identifiable.randomUID("linReg"))
@@ -219,33 +219,49 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
     }
 
     val yMean = ySummarizer.mean(0)
-    val yStd = math.sqrt(ySummarizer.variance(0))
+    val rawYStd = math.sqrt(ySummarizer.variance(0))
+    if (rawYStd == 0.0) {
+      if ($(fitIntercept) || yMean==0.0) {
+        // If the rawYStd is zero and fitIntercept=true, then the intercept is yMean with
+        // zero coefficient; as a result, training is not needed.
+        // Also, if yMean==0 and rawYStd==0, all the coefficients are zero regardless of
+        // the fitIntercept
+        if (yMean == 0.0) {
+          logWarning(s"Mean and standard deviation of the label are zero, so the coefficients " +
+            s"and the intercept will all be zero; as a result, training is not needed.")
+        } else {
+          logWarning(s"The standard deviation of the label is zero, so the coefficients will be " +
+            s"zeros and the intercept will be the mean of the label; as a result, " +
+            s"training is not needed.")
+        }
+        if (handlePersistence) instances.unpersist()
+        val coefficients = Vectors.sparse(numFeatures, Seq())
+        val intercept = yMean
 
-    // If the yStd is zero, then the intercept is yMean with zero coefficient;
-    // as a result, training is not needed.
-    if (yStd == 0.0) {
-      logWarning(s"The standard deviation of the label is zero, so the coefficients will be " +
-        s"zeros and the intercept will be the mean of the label; as a result, " +
-        s"training is not needed.")
-      if (handlePersistence) instances.unpersist()
-      val coefficients = Vectors.sparse(numFeatures, Seq())
-      val intercept = yMean
+        val model = new LinearRegressionModel(uid, coefficients, intercept)
+        // Handle possible missing or invalid prediction columns
+        val (summaryModel, predictionColName) = model.findSummaryModelAndPredictionCol()
 
-      val model = new LinearRegressionModel(uid, coefficients, intercept)
-      // Handle possible missing or invalid prediction columns
-      val (summaryModel, predictionColName) = model.findSummaryModelAndPredictionCol()
-
-      val trainingSummary = new LinearRegressionTrainingSummary(
-        summaryModel.transform(dataset),
-        predictionColName,
-        $(labelCol),
-        model,
-        Array(0D),
-        $(featuresCol),
-        Array(0D))
-      return copyValues(model.setSummary(trainingSummary))
+        val trainingSummary = new LinearRegressionTrainingSummary(
+          summaryModel.transform(dataset),
+          predictionColName,
+          $(labelCol),
+          model,
+          Array(0D),
+          $(featuresCol),
+          Array(0D))
+        return copyValues(model.setSummary(trainingSummary))
+      } else {
+        require($(regParam) == 0.0, "The standard deviation of the label is zero. " +
+          "Model cannot be regularized.")
+        logWarning(s"The standard deviation of the label is zero. " +
+          "Consider setting fitIntercept=true.")
+      }
     }
 
+    // if y is constant (rawYStd is zero), then y cannot be scaled. In this case
+    // setting yStd=1.0 ensures that y is not scaled anymore in l-bfgs algorithm.
+    val yStd = if (rawYStd > 0) rawYStd else math.abs(yMean)
     val featuresMean = featuresSummarizer.mean.toArray
     val featuresStd = featuresSummarizer.variance.toArray.map(math.sqrt)
 
@@ -345,19 +361,13 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
 
   @Since("1.4.0")
   override def copy(extra: ParamMap): LinearRegression = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 @Since("1.6.0")
-object LinearRegression extends Readable[LinearRegression] {
+object LinearRegression extends DefaultParamsReadable[LinearRegression] {
 
   @Since("1.6.0")
-  override def read: Reader[LinearRegression] = new DefaultParamsReader[LinearRegression]
-
-  @Since("1.6.0")
-  override def load(path: String): LinearRegression = read.load(path)
+  override def load(path: String): LinearRegression = super.load(path)
 }
 
 /**
@@ -371,7 +381,7 @@ class LinearRegressionModel private[ml] (
     val coefficients: Vector,
     val intercept: Double)
   extends RegressionModel[Vector, LinearRegressionModel]
-  with LinearRegressionParams with Writable {
+  with LinearRegressionParams with MLWritable {
 
   private var trainingSummary: Option[LinearRegressionTrainingSummary] = None
 
@@ -441,7 +451,7 @@ class LinearRegressionModel private[ml] (
   }
 
   /**
-   * Returns a [[Writer]] instance for this ML instance.
+   * Returns a [[MLWriter]] instance for this ML instance.
    *
    * For [[LinearRegressionModel]], this does NOT currently save the training [[summary]].
    * An option to save [[summary]] may be added in the future.
@@ -449,21 +459,21 @@ class LinearRegressionModel private[ml] (
    * This also does not save the [[parent]] currently.
    */
   @Since("1.6.0")
-  override def write: Writer = new LinearRegressionModel.LinearRegressionModelWriter(this)
+  override def write: MLWriter = new LinearRegressionModel.LinearRegressionModelWriter(this)
 }
 
 @Since("1.6.0")
-object LinearRegressionModel extends Readable[LinearRegressionModel] {
+object LinearRegressionModel extends MLReadable[LinearRegressionModel] {
 
   @Since("1.6.0")
-  override def read: Reader[LinearRegressionModel] = new LinearRegressionModelReader
+  override def read: MLReader[LinearRegressionModel] = new LinearRegressionModelReader
 
   @Since("1.6.0")
-  override def load(path: String): LinearRegressionModel = read.load(path)
+  override def load(path: String): LinearRegressionModel = super.load(path)
 
-  /** [[Writer]] instance for [[LinearRegressionModel]] */
+  /** [[MLWriter]] instance for [[LinearRegressionModel]] */
   private[LinearRegressionModel] class LinearRegressionModelWriter(instance: LinearRegressionModel)
-    extends Writer with Logging {
+    extends MLWriter with Logging {
 
     private case class Data(intercept: Double, coefficients: Vector)
 
@@ -473,14 +483,14 @@ object LinearRegressionModel extends Readable[LinearRegressionModel] {
       // Save model data: intercept, coefficients
       val data = Data(instance.intercept, instance.coefficients)
       val dataPath = new Path(path, "data").toString
-      sqlContext.createDataFrame(Seq(data)).write.format("parquet").save(dataPath)
+      sqlContext.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
     }
   }
 
-  private class LinearRegressionModelReader extends Reader[LinearRegressionModel] {
+  private class LinearRegressionModelReader extends MLReader[LinearRegressionModel] {
 
     /** Checked against metadata when loading model */
-    private val className = "org.apache.spark.ml.regression.LinearRegressionModel"
+    private val className = classOf[LinearRegressionModel].getName
 
     override def load(path: String): LinearRegressionModel = {
       val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
@@ -535,17 +545,21 @@ class LinearRegressionSummary private[regression] (
     val predictionCol: String,
     val labelCol: String,
     val model: LinearRegressionModel,
-    val diagInvAtWA: Array[Double]) extends Serializable {
+    private val diagInvAtWA: Array[Double]) extends Serializable {
 
   @transient private val metrics = new RegressionMetrics(
     predictions
       .select(predictionCol, labelCol)
-      .map { case Row(pred: Double, label: Double) => (pred, label) } )
+      .map { case Row(pred: Double, label: Double) => (pred, label) },
+    !model.getFitIntercept)
 
   /**
    * Returns the explained variance regression score.
    * explainedVariance = 1 - variance(y - \hat{y}) / variance(y)
    * Reference: [[http://en.wikipedia.org/wiki/Explained_variation]]
+   *
+   * Note: This ignores instance weights (setting all to 1.0) from [[LinearRegression.weightCol]].
+   *       This will change in later Spark versions.
    */
   @Since("1.5.0")
   val explainedVariance: Double = metrics.explainedVariance
@@ -553,6 +567,9 @@ class LinearRegressionSummary private[regression] (
   /**
    * Returns the mean absolute error, which is a risk function corresponding to the
    * expected value of the absolute error loss or l1-norm loss.
+   *
+   * Note: This ignores instance weights (setting all to 1.0) from [[LinearRegression.weightCol]].
+   *       This will change in later Spark versions.
    */
   @Since("1.5.0")
   val meanAbsoluteError: Double = metrics.meanAbsoluteError
@@ -560,6 +577,9 @@ class LinearRegressionSummary private[regression] (
   /**
    * Returns the mean squared error, which is a risk function corresponding to the
    * expected value of the squared error loss or quadratic loss.
+   *
+   * Note: This ignores instance weights (setting all to 1.0) from [[LinearRegression.weightCol]].
+   *       This will change in later Spark versions.
    */
   @Since("1.5.0")
   val meanSquaredError: Double = metrics.meanSquaredError
@@ -567,6 +587,9 @@ class LinearRegressionSummary private[regression] (
   /**
    * Returns the root mean squared error, which is defined as the square root of
    * the mean squared error.
+   *
+   * Note: This ignores instance weights (setting all to 1.0) from [[LinearRegression.weightCol]].
+   *       This will change in later Spark versions.
    */
   @Since("1.5.0")
   val rootMeanSquaredError: Double = metrics.rootMeanSquaredError
@@ -574,6 +597,9 @@ class LinearRegressionSummary private[regression] (
   /**
    * Returns R^2^, the coefficient of determination.
    * Reference: [[http://en.wikipedia.org/wiki/Coefficient_of_determination]]
+   *
+   * Note: This ignores instance weights (setting all to 1.0) from [[LinearRegression.weightCol]].
+   *       This will change in later Spark versions.
    */
   @Since("1.5.0")
   val r2: Double = metrics.r2

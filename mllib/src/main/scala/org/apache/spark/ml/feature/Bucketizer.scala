@@ -20,7 +20,7 @@ package org.apache.spark.ml.feature
 import java.{util => ju}
 
 import org.apache.spark.SparkException
-import org.apache.spark.annotation.{Since, Experimental}
+import org.apache.spark.annotation.{Experimental, Since}
 import org.apache.spark.ml.Model
 import org.apache.spark.ml.attribute.NominalAttribute
 import org.apache.spark.ml.param._
@@ -36,7 +36,7 @@ import org.apache.spark.sql.types.{DoubleType, StructField, StructType}
  */
 @Experimental
 final class Bucketizer(override val uid: String)
-  extends Model[Bucketizer] with HasInputCol with HasOutputCol with Writable {
+  extends Model[Bucketizer] with HasInputCol with HasOutputCol with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("bucketizer"))
 
@@ -86,6 +86,7 @@ final class Bucketizer(override val uid: String)
   }
 
   override def transformSchema(schema: StructType): StructType = {
+    validateParams()
     SchemaUtils.checkColumnType(schema, $(inputCol), DoubleType)
     SchemaUtils.appendColumn(schema, prepOutputField(schema))
   }
@@ -93,12 +94,9 @@ final class Bucketizer(override val uid: String)
   override def copy(extra: ParamMap): Bucketizer = {
     defaultCopy[Bucketizer](extra).setParent(parent)
   }
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
-object Bucketizer extends Readable[Bucketizer] {
+object Bucketizer extends DefaultParamsReadable[Bucketizer] {
 
   /** We require splits to be of length >= 3 and to be in strictly increasing order. */
   private[feature] def checkSplits(splits: Array[Double]): Boolean = {
@@ -140,8 +138,5 @@ object Bucketizer extends Readable[Bucketizer] {
   }
 
   @Since("1.6.0")
-  override def read: Reader[Bucketizer] = new DefaultParamsReader[Bucketizer]
-
-  @Since("1.6.0")
-  override def load(path: String): Bucketizer = read.load(path)
+  override def load(path: String): Bucketizer = super.load(path)
 }

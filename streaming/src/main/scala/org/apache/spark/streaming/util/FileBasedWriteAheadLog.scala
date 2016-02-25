@@ -17,8 +17,8 @@
 package org.apache.spark.streaming.util
 
 import java.nio.ByteBuffer
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.{Iterator => JIterator}
+import java.util.concurrent.{RejectedExecutionException, ThreadPoolExecutor}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -29,14 +29,15 @@ import scala.language.postfixOps
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 
-import org.apache.spark.util.{CompletionIterator, ThreadUtils}
 import org.apache.spark.{Logging, SparkConf}
+import org.apache.spark.util.{CompletionIterator, ThreadUtils}
 
 /**
  * This class manages write ahead log files.
- * - Writes records (bytebuffers) to periodically rotating log files.
- * - Recovers the log files and the reads the recovered records upon failures.
- * - Cleans up old log files.
+ *
+ *  - Writes records (bytebuffers) to periodically rotating log files.
+ *  - Recovers the log files and the reads the recovered records upon failures.
+ *  - Cleans up old log files.
  *
  * Uses [[org.apache.spark.streaming.util.FileBasedWriteAheadLogWriter]] to write
  * and [[org.apache.spark.streaming.util.FileBasedWriteAheadLogReader]] to read.
@@ -56,12 +57,18 @@ private[streaming] class FileBasedWriteAheadLog(
   import FileBasedWriteAheadLog._
 
   private val pastLogs = new ArrayBuffer[LogInfo]
-  private val callerNameTag = getCallerName.map(c => s" for $c").getOrElse("")
+  private val callerName = getCallerName
 
-  private val threadpoolName = s"WriteAheadLogManager $callerNameTag"
+  private val threadpoolName = {
+    "WriteAheadLogManager" + callerName.map(c => s" for $c").getOrElse("")
+  }
   private val threadpool = ThreadUtils.newDaemonCachedThreadPool(threadpoolName, 20)
   private val executionContext = ExecutionContext.fromExecutorService(threadpool)
-  override protected val logName = s"WriteAheadLogManager $callerNameTag"
+
+  override protected def logName = {
+    getClass.getName.stripSuffix("$") +
+      callerName.map("_" + _).getOrElse("").replaceAll("[ ]", "_")
+  }
 
   private var currentLogPath: Option[String] = None
   private var currentLogWriter: FileBasedWriteAheadLogWriter = null
@@ -176,10 +183,16 @@ private[streaming] class FileBasedWriteAheadLog(
     }
     oldLogFiles.foreach { logInfo =>
       if (!executionContext.isShutdown) {
-        val f = Future { deleteFile(logInfo) }(executionContext)
-        if (waitForCompletion) {
-          import scala.concurrent.duration._
-          Await.ready(f, 1 second)
+        try {
+          val f = Future { deleteFile(logInfo) }(executionContext)
+          if (waitForCompletion) {
+            import scala.concurrent.duration._
+            Await.ready(f, 1 second)
+          }
+        } catch {
+          case e: RejectedExecutionException =>
+            logWarning("Execution context shutdown before deleting old WriteAheadLogs. " +
+              "This would not affect recovery correctness.", e)
         }
       }
     }
@@ -217,7 +230,8 @@ private[streaming] class FileBasedWriteAheadLog(
     val logDirectoryPath = new Path(logDirectory)
     val fileSystem = HdfsUtils.getFileSystemForPath(logDirectoryPath, hadoopConf)
 
-    if (fileSystem.exists(logDirectoryPath) && fileSystem.getFileStatus(logDirectoryPath).isDir) {
+    if (fileSystem.exists(logDirectoryPath) &&
+        fileSystem.getFileStatus(logDirectoryPath).isDirectory) {
       val logFileInfo = logFilesTologInfo(fileSystem.listStatus(logDirectoryPath).map { _.getPath })
       pastLogs.clear()
       pastLogs ++= logFileInfo
@@ -245,8 +259,12 @@ private[streaming] object FileBasedWriteAheadLog {
   }
 
   def getCallerName(): Option[String] = {
-    val stackTraceClasses = Thread.currentThread.getStackTrace().map(_.getClassName)
-    stackTraceClasses.find(!_.contains("WriteAheadLog")).flatMap(_.split(".").lastOption)
+    val blacklist = Seq("WriteAheadLog", "Logging", "java.lang", "scala.")
+    Thread.currentThread.getStackTrace()
+      .map(_.getClassName)
+      .find { c => !blacklist.exists(c.contains) }
+      .flatMap(_.split("\\.").lastOption)
+      .flatMap(_.split("\\$\\$").headOption)
   }
 
   /** Convert a sequence of files to a sequence of sorted LogInfo objects */

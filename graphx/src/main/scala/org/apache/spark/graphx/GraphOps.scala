@@ -17,14 +17,17 @@
 
 package org.apache.spark.graphx
 
+import scala.reflect.{classTag, ClassTag}
 import scala.reflect.ClassTag
 import scala.util.Random
 
-import org.apache.spark.SparkException
+import org.apache.spark.HashPartitioner
 import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
-
+import org.apache.spark.SparkException
+import org.apache.spark.graphx.impl.EdgePartitionBuilder
+import org.apache.spark.graphx.impl.GraphImpl
 import org.apache.spark.graphx.lib._
+import org.apache.spark.rdd.RDD
 
 /**
  * Contains additional functionality for [[Graph]]. All operations are expressed in terms of the
@@ -183,6 +186,15 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
         throw new SparkException("collectEdges does not support EdgeDirection.Both. Use" +
           "EdgeDirection.Either instead.")
     }
+  }
+
+  /**
+   * Remove self edges.
+   *
+   * @return a graph with all self edges removed
+   */
+  def removeSelfEdges(): Graph[VD, ED] = {
+    graph.subgraph(epred = e => e.srcId != e.dstId)
   }
 
   /**
@@ -380,7 +392,7 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    * @see [[org.apache.spark.graphx.lib.PageRank$#runUntilConvergenceWithOptions]]
    */
   def personalizedPageRank(src: VertexId, tol: Double,
-    resetProb: Double = 0.15) : Graph[Double, Double] = {
+    resetProb: Double = 0.15): Graph[Double, Double] = {
     PageRank.runUntilConvergenceWithOptions(graph, tol, resetProb, Some(src))
   }
 
@@ -393,7 +405,7 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    * @see [[org.apache.spark.graphx.lib.PageRank$#runWithOptions]]
    */
   def staticPersonalizedPageRank(src: VertexId, numIter: Int,
-    resetProb: Double = 0.15) : Graph[Double, Double] = {
+    resetProb: Double = 0.15): Graph[Double, Double] = {
     PageRank.runWithOptions(graph, numIter, resetProb, Some(src))
   }
 
@@ -408,13 +420,23 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
   }
 
   /**
+    * Compute the connected component membership of each vertex and return a graph with the vertex
+    * value containing the lowest vertex id in the connected component containing that vertex.
+    *
+    * @see [[org.apache.spark.graphx.lib.ConnectedComponents$#run]]
+    */
+  def connectedComponents(): Graph[VertexId, ED] = {
+    ConnectedComponents.run(graph)
+  }
+
+  /**
    * Compute the connected component membership of each vertex and return a graph with the vertex
    * value containing the lowest vertex id in the connected component containing that vertex.
    *
    * @see [[org.apache.spark.graphx.lib.ConnectedComponents$#run]]
    */
-  def connectedComponents(): Graph[VertexId, ED] = {
-    ConnectedComponents.run(graph)
+  def connectedComponents(maxIterations: Int): Graph[VertexId, ED] = {
+    ConnectedComponents.run(graph, maxIterations)
   }
 
   /**

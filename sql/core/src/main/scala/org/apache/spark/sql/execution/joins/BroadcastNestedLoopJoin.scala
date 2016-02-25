@@ -20,8 +20,8 @@ package org.apache.spark.sql.execution.joins
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.catalyst.plans._
+import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.util.collection.{BitSet, CompactBuffer}
@@ -33,11 +33,8 @@ case class BroadcastNestedLoopJoin(
     buildSide: BuildSide,
     joinType: JoinType,
     condition: Option[Expression]) extends BinaryNode {
-  // TODO: Override requiredChildDistribution.
 
   override private[sql] lazy val metrics = Map(
-    "numLeftRows" -> SQLMetrics.createLongMetric(sparkContext, "number of left rows"),
-    "numRightRows" -> SQLMetrics.createLongMetric(sparkContext, "number of right rows"),
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
 
   /** BuildRight means the right relation <=> the broadcast relation. */
@@ -46,15 +43,15 @@ case class BroadcastNestedLoopJoin(
     case BuildLeft => (right, left)
   }
 
-  override def outputsUnsafeRows: Boolean = left.outputsUnsafeRows || right.outputsUnsafeRows
-  override def canProcessUnsafeRows: Boolean = true
+  override def requiredChildDistribution: Seq[Distribution] = buildSide match {
+    case BuildLeft =>
+      BroadcastDistribution(IdentityBroadcastMode) :: UnspecifiedDistribution :: Nil
+    case BuildRight =>
+      UnspecifiedDistribution :: BroadcastDistribution(IdentityBroadcastMode) :: Nil
+  }
 
   private[this] def genResultProjection: InternalRow => InternalRow = {
-    if (outputsUnsafeRows) {
-      UnsafeProjection.create(schema)
-    } else {
-      identity[InternalRow]
-    }
+    UnsafeProjection.create(schema)
   }
 
   override def outputPartitioning: Partitioning = streamed.outputPartitioning
@@ -80,22 +77,16 @@ case class BroadcastNestedLoopJoin(
     newPredicate(condition.getOrElse(Literal(true)), left.output ++ right.output)
 
   protected override def doExecute(): RDD[InternalRow] = {
-    val (numStreamedRows, numBuildRows) = buildSide match {
-      case BuildRight => (longMetric("numLeftRows"), longMetric("numRightRows"))
-      case BuildLeft => (longMetric("numRightRows"), longMetric("numLeftRows"))
-    }
     val numOutputRows = longMetric("numOutputRows")
 
-    val broadcastedRelation =
-      sparkContext.broadcast(broadcast.execute().map { row =>
-        numBuildRows += 1
-        row.copy()
-      }.collect().toIndexedSeq)
+    val broadcastedRelation = broadcast.executeBroadcast[Array[InternalRow]]()
 
     /** All rows that either match both-way, or rows from streamed joined with nulls. */
     val matchesOrStreamedRowsWithNulls = streamed.execute().mapPartitions { streamedIter =>
+      val relation = broadcastedRelation.value
+
       val matchedRows = new CompactBuffer[InternalRow]
-      val includedBroadcastTuples = new BitSet(broadcastedRelation.value.size)
+      val includedBroadcastTuples = new BitSet(relation.length)
       val joinedRow = new JoinedRow
 
       val leftNulls = new GenericMutableRow(left.output.size)
@@ -105,10 +96,9 @@ case class BroadcastNestedLoopJoin(
       streamedIter.foreach { streamedRow =>
         var i = 0
         var streamRowMatched = false
-        numStreamedRows += 1
 
-        while (i < broadcastedRelation.value.size) {
-          val broadcastedRow = broadcastedRelation.value(i)
+        while (i < relation.length) {
+          val broadcastedRow = relation(i)
           buildSide match {
             case BuildRight if boundCondition(joinedRow(streamedRow, broadcastedRow)) =>
               matchedRows += resultProj(joinedRow(streamedRow, broadcastedRow)).copy()

@@ -18,22 +18,30 @@
 package org.apache.spark.ml.feature
 
 import org.apache.spark.SparkContext
-import org.apache.spark.annotation.{Since, Experimental}
-import org.apache.spark.ml.param.{ParamMap, Param}
+import org.apache.spark.annotation.{Experimental, Since}
+import org.apache.spark.ml.param.{Param, ParamMap}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.util._
-import org.apache.spark.sql.{SQLContext, DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types.StructType
 
 /**
  * :: Experimental ::
- * Implements the transforms which are defined by SQL statement.
- * Currently we only support SQL syntax like 'SELECT ... FROM __THIS__'
+ * Implements the transformations which are defined by SQL statement.
+ * Currently we only support SQL syntax like 'SELECT ... FROM __THIS__ ...'
  * where '__THIS__' represents the underlying table of the input dataset.
+ * The select clause specifies the fields, constants, and expressions to display in
+ * the output, it can be any select clause that Spark SQL supports. Users can also
+ * use Spark SQL built-in function and UDFs to operate on these selected columns.
+ * For example, [[SQLTransformer]] supports statements like:
+ *  - SELECT a, a + b AS a_b FROM __THIS__
+ *  - SELECT a, SQRT(b) AS b_sqrt FROM __THIS__ where a > 5
+ *  - SELECT a, b, SUM(c) AS c_sum FROM __THIS__ GROUP BY a, b
  */
 @Experimental
 @Since("1.6.0")
-class SQLTransformer @Since("1.6.0") (override val uid: String) extends Transformer with Writable {
+class SQLTransformer @Since("1.6.0") (override val uid: String) extends Transformer
+  with DefaultParamsWritable {
 
   @Since("1.6.0")
   def this() = this(Identifiable.randomUID("sql"))
@@ -66,6 +74,7 @@ class SQLTransformer @Since("1.6.0") (override val uid: String) extends Transfor
 
   @Since("1.6.0")
   override def transformSchema(schema: StructType): StructType = {
+    validateParams()
     val sc = SparkContext.getOrCreate()
     val sqlContext = SQLContext.getOrCreate(sc)
     val dummyRDD = sc.parallelize(Seq(Row.empty))
@@ -77,17 +86,11 @@ class SQLTransformer @Since("1.6.0") (override val uid: String) extends Transfor
 
   @Since("1.6.0")
   override def copy(extra: ParamMap): SQLTransformer = defaultCopy(extra)
-
-  @Since("1.6.0")
-  override def write: Writer = new DefaultParamsWriter(this)
 }
 
 @Since("1.6.0")
-object SQLTransformer extends Readable[SQLTransformer] {
+object SQLTransformer extends DefaultParamsReadable[SQLTransformer] {
 
   @Since("1.6.0")
-  override def read: Reader[SQLTransformer] = new DefaultParamsReader[SQLTransformer]
-
-  @Since("1.6.0")
-  override def load(path: String): SQLTransformer = read.load(path)
+  override def load(path: String): SQLTransformer = super.load(path)
 }

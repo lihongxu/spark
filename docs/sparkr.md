@@ -148,7 +148,7 @@ printSchema(people)
 </div>
 
 The data sources API can also be used to save out DataFrames into multiple file formats. For example we can save the DataFrame from the previous example
-to a Parquet file using `write.df`
+to a Parquet file using `write.df` (Until Spark 1.6, the default mode for writes was `append`. It was changed in Spark 1.7 to `error` to match the Scala API)
 
 <div data-lang="r"  markdown="1">
 {% highlight r %}
@@ -286,7 +286,7 @@ head(teenagers)
 
 # Machine Learning
 
-SparkR allows the fitting of generalized linear models over DataFrames using the [glm()](api/R/glm.html) function. Under the hood, SparkR uses MLlib to train a model of the specified family. Currently the gaussian and binomial families are supported. We support a subset of the available R formula operators for model fitting, including '~', '.', ':', '+', and '-'. 
+SparkR allows the fitting of generalized linear models over DataFrames using the [glm()](api/R/glm.html) function. Under the hood, SparkR uses MLlib to train a model of the specified family. Currently the gaussian and binomial families are supported. We support a subset of the available R formula operators for model fitting, including '~', '.', ':', '+', and '-'.
 
 The [summary()](api/R/summary.html) function gives the summary of a model produced by [glm()](api/R/glm.html).
 
@@ -351,3 +351,43 @@ summary(model)
 ##Sepal_Width    0.404655
 {% endhighlight %}
 </div>
+
+# R Function Name Conflicts
+
+When loading and attaching a new package in R, it is possible to have a name [conflict](https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html), where a
+function is masking another function.
+
+The following functions are masked by the SparkR package:
+
+<table class="table">
+  <tr><th>Masked function</th><th>How to Access</th></tr>
+  <tr>
+    <td><code>cov</code> in <code>package:stats</code></td>
+    <td><code><pre>stats::cov(x, y = NULL, use = "everything",
+           method = c("pearson", "kendall", "spearman"))</pre></code></td>
+  </tr>
+  <tr>
+    <td><code>filter</code> in <code>package:stats</code></td>
+    <td><code><pre>stats::filter(x, filter, method = c("convolution", "recursive"),
+              sides = 2, circular = FALSE, init)</pre></code></td>
+  </tr>
+  <tr>
+    <td><code>sample</code> in <code>package:base</code></td>
+    <td><code>base::sample(x, size, replace = FALSE, prob = NULL)</code></td>
+  </tr>
+</table>
+
+Since part of SparkR is modeled on the `dplyr` package, certain functions in SparkR share the same names with those in `dplyr`. Depending on the load order of the two packages, some functions from the package loaded first are masked by those in the package loaded after. In such case, prefix such calls with the package name, for instance, `SparkR::cume_dist(x)` or `dplyr::cume_dist(x)`.
+
+You can inspect the search path in R with [`search()`](https://stat.ethz.ch/R-manual/R-devel/library/base/html/search.html)
+
+
+# Migration Guide
+
+## Upgrading From SparkR 1.5.x to 1.6
+
+ - Before Spark 1.6, the default mode for writes was `append`. It was changed in Spark 1.6.0 to `error` to match the Scala API.
+
+## Upgrading From SparkR 1.6.x to 2.0
+
+ - The method `table` has been removed and replaced by `tableToDF`.

@@ -17,19 +17,17 @@
 
 package org.apache.spark.sql
 
-import org.apache.spark.sql.execution.aggregate.TypedAggregateExpression
-
 import scala.language.implicitConversions
 
-import org.apache.spark.annotation.Experimental
 import org.apache.spark.Logging
-import org.apache.spark.sql.functions.lit
+import org.apache.spark.annotation.Experimental
 import org.apache.spark.sql.catalyst.analysis._
-import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, encoderFor}
+import org.apache.spark.sql.catalyst.encoders.{encoderFor, ExpressionEncoder}
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.util.DataTypeParser
+import org.apache.spark.sql.catalyst.util.{usePrettyExpression, DataTypeParser}
+import org.apache.spark.sql.execution.aggregate.TypedAggregateExpression
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.types._
-
 
 private[sql] object Column {
 
@@ -42,14 +40,18 @@ private[sql] object Column {
 
 /**
  * A [[Column]] where an [[Encoder]] has been given for the expected input and return type.
- * @since 1.6.0
+ * To create a [[TypedColumn]], use the `as` function on a [[Column]].
+ *
  * @tparam T The input type expected for this expression.  Can be `Any` if the expression is type
  *           checked by the analyzer instead of the compiler (i.e. `expr("sum(...)")`).
  * @tparam U The output type of this column.
+ *
+ * @since 1.6.0
  */
 class TypedColumn[-T, U](
     expr: Expression,
-    private[sql] val encoder: ExpressionEncoder[U]) extends Column(expr) {
+    private[sql] val encoder: ExpressionEncoder[U])
+  extends Column(expr) {
 
   /**
    * Inserts the specific input type and schema into any expressions that are expected to operate
@@ -59,18 +61,36 @@ class TypedColumn[-T, U](
       inputEncoder: ExpressionEncoder[_],
       schema: Seq[Attribute]): TypedColumn[T, U] = {
     val boundEncoder = inputEncoder.bind(schema).asInstanceOf[ExpressionEncoder[Any]]
-    new TypedColumn[T, U] (expr transform {
-      case ta: TypedAggregateExpression if ta.aEncoder.isEmpty =>
-        ta.copy(
-          aEncoder = Some(boundEncoder),
-          children = schema)
-    }, encoder)
+    new TypedColumn[T, U](
+      expr transform { case ta: TypedAggregateExpression if ta.aEncoder.isEmpty =>
+        ta.copy(aEncoder = Some(boundEncoder), children = schema)
+      },
+      encoder)
   }
 }
 
 /**
  * :: Experimental ::
- * A column in a [[DataFrame]].
+ * A column that will be computed based on the data in a [[DataFrame]].
+ *
+ * A new column is constructed based on the input columns present in a dataframe:
+ *
+ * {{{
+ *   df("columnName")            // On a specific DataFrame.
+ *   col("columnName")           // A generic column no yet associcated with a DataFrame.
+ *   col("columnName.field")     // Extracting a struct field
+ *   col("`a.column.with.dots`") // Escape `.` in column names.
+ *   $"columnName"               // Scala short hand for a named column.
+ *   expr("a + 1")               // A column that is constructed from a parsed SQL Expression.
+ *   lit("abc")                  // A column that produces a literal (constant) value.
+ * }}}
+ *
+ * [[Column]] objects can be composed to form complex expressions:
+ *
+ * {{{
+ *   $"a" + 1
+ *   $"a" === $"b"
+ * }}}
  *
  * @groupname java_expr_ops Java-specific expression operators
  * @groupname expr_ops Expression operators
@@ -84,10 +104,9 @@ class Column(protected[sql] val expr: Expression) extends Logging {
 
   def this(name: String) = this(name match {
     case "*" => UnresolvedStar(None)
-    case _ if name.endsWith(".*") => {
+    case _ if name.endsWith(".*") =>
       val parts = UnresolvedAttribute.parseAttributeName(name.substring(0, name.length - 2))
       UnresolvedStar(Some(parts))
-    }
     case _ => UnresolvedAttribute.quotedString(name)
   })
 
@@ -103,17 +122,31 @@ class Column(protected[sql] val expr: Expression) extends Logging {
     // make it a NamedExpression.
     case u: UnresolvedAttribute => UnresolvedAlias(u)
 
+    case u: UnresolvedExtractValue => UnresolvedAlias(u)
+
     case expr: NamedExpression => expr
 
     // Leave an unaliased generator with an empty list of names since the analyzer will generate
     // the correct defaults after the nested expression's type has been resolved.
     case explode: Explode => MultiAlias(explode, Nil)
+
     case jt: JsonTuple => MultiAlias(jt, Nil)
 
-    case expr: Expression => Alias(expr, expr.prettyString)()
+    case func: UnresolvedFunction => UnresolvedAlias(func, Some(usePrettyExpression(func).sql))
+
+    // If we have a top level Cast, there is a chance to give it a better alias, if there is a
+    // NamedExpression under this Cast.
+    case c: Cast => c.transformUp {
+      case Cast(ne: NamedExpression, to) => UnresolvedAlias(Cast(ne, to))
+    } match {
+      case ne: NamedExpression => ne
+      case other => Alias(expr, usePrettyExpression(expr).sql)()
+    }
+
+    case expr: Expression => Alias(expr, usePrettyExpression(expr).sql)()
   }
 
-  override def toString: String = expr.prettyString
+  override def toString: String = usePrettyExpression(expr).sql
 
   override def equals(that: Any): Boolean = that match {
     case that: Column => that.expr.equals(this.expr)
@@ -133,11 +166,12 @@ class Column(protected[sql] val expr: Expression) extends Logging {
   /**
    * Extracts a value or values from a complex type.
    * The following types of extraction are supported:
-   * - Given an Array, an integer ordinal can be used to retrieve a single value.
-   * - Given a Map, a key of the correct type can be used to retrieve an individual value.
-   * - Given a Struct, a string fieldName can be used to extract that field.
-   * - Given an Array of Structs, a string fieldName can be used to extract filed
-   *   of every struct in that array, and return an Array of fields
+   *
+   *  - Given an Array, an integer ordinal can be used to retrieve a single value.
+   *  - Given a Map, a key of the correct type can be used to retrieve an individual value.
+   *  - Given a Struct, a string fieldName can be used to extract that field.
+   *  - Given an Array of Structs, a string fieldName can be used to extract filed
+   *    of every struct in that array, and return an Array of fields
    *
    * @group expr_ops
    * @since 1.4.0
@@ -412,8 +446,11 @@ class Column(protected[sql] val expr: Expression) extends Logging {
    * @since 1.4.0
    */
   def when(condition: Column, value: Any): Column = this.expr match {
-    case CaseWhen(branches: Seq[Expression]) =>
-      withExpr { CaseWhen(branches ++ Seq(lit(condition).expr, lit(value).expr)) }
+    case CaseWhen(branches, None) =>
+      withExpr { CaseWhen(branches :+ (condition.expr, lit(value).expr)) }
+    case CaseWhen(branches, Some(_)) =>
+      throw new IllegalArgumentException(
+        "when() cannot be applied once otherwise() is applied")
     case _ =>
       throw new IllegalArgumentException(
         "when() can only be applied on a Column previously generated by when() function")
@@ -441,13 +478,11 @@ class Column(protected[sql] val expr: Expression) extends Logging {
    * @since 1.4.0
    */
   def otherwise(value: Any): Column = this.expr match {
-    case CaseWhen(branches: Seq[Expression]) =>
-      if (branches.size % 2 == 0) {
-        withExpr { CaseWhen(branches :+ lit(value).expr) }
-      } else {
-        throw new IllegalArgumentException(
-          "otherwise() can only be applied once on a Column previously generated by when()")
-      }
+    case CaseWhen(branches, None) =>
+      withExpr { CaseWhen(branches, Option(lit(value).expr)) }
+    case CaseWhen(branches, Some(_)) =>
+      throw new IllegalArgumentException(
+        "otherwise() can only be applied once on a Column previously generated by when()")
     case _ =>
       throw new IllegalArgumentException(
         "otherwise() can only be applied on a Column previously generated by when()")
@@ -688,17 +723,6 @@ class Column(protected[sql] val expr: Expression) extends Logging {
    * by the evaluated values of the arguments.
    *
    * @group expr_ops
-   * @since 1.3.0
-   */
-  @deprecated("use isin", "1.5.0")
-  @scala.annotation.varargs
-  def in(list: Any*): Column = isin(list : _*)
-
-  /**
-   * A boolean expression that is evaluated to true if the value of this expression is contained
-   * by the evaluated values of the arguments.
-   *
-   * @group expr_ops
    * @since 1.5.0
    */
   @scala.annotation.varargs
@@ -907,13 +931,7 @@ class Column(protected[sql] val expr: Expression) extends Logging {
    * @group expr_ops
    * @since 1.3.0
    */
-  def cast(to: DataType): Column = withExpr {
-    expr match {
-      // keeps the name of expression if possible when do cast.
-      case ne: NamedExpression => UnresolvedAlias(Cast(expr, to))
-      case _ => Cast(expr, to)
-    }
-  }
+  def cast(to: DataType): Column = withExpr { Cast(expr, to) }
 
   /**
    * Casts the column to a different data type, using the canonical string representation
@@ -970,7 +988,7 @@ class Column(protected[sql] val expr: Expression) extends Logging {
     if (extended) {
       println(expr)
     } else {
-      println(expr.prettyString)
+      println(expr.sql)
     }
     // scalastyle:on println
   }

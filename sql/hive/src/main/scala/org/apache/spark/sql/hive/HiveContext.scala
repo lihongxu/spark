@@ -35,37 +35,26 @@ import org.apache.hadoop.hive.conf.HiveConf.ConfVars
 import org.apache.hadoop.hive.ql.metadata.Table
 import org.apache.hadoop.hive.ql.parse.VariableSubstitution
 import org.apache.hadoop.hive.serde2.io.{DateWritable, TimestampWritable}
+import org.apache.hadoop.util.VersionInfo
 
+import org.apache.spark.{Logging, SparkContext}
 import org.apache.spark.api.java.JavaSparkContext
+import org.apache.spark.sql._
 import org.apache.spark.sql.SQLConf.SQLConfEntry
 import org.apache.spark.sql.SQLConf.SQLConfEntry._
-import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.{InternalRow, ParserInterface}
 import org.apache.spark.sql.catalyst.analysis._
-import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.expressions.{Expression, LeafExpression}
+import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.{InternalRow, ParserDialect, SqlParser}
-import org.apache.spark.sql.execution.datasources.{ResolveDataSource, DataSourceStrategy, PreInsertCastAndRename, PreWriteCheck}
+import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.datasources.{DataSourceStrategy, PreInsertCastAndRename, PreWriteCheck, ResolveDataSource}
 import org.apache.spark.sql.execution.ui.SQLListener
-import org.apache.spark.sql.execution.{CacheManager, ExecutedCommand, ExtractPythonUDFs, SetCommand}
 import org.apache.spark.sql.hive.client._
 import org.apache.spark.sql.hive.execution.{DescribeHiveTableCommand, HiveNativeCommand}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.Utils
-import org.apache.spark.{Logging, SparkContext}
-
-
-/**
- * This is the HiveQL Dialect, this dialect is strongly bind with HiveContext
- */
-private[hive] class HiveQLDialect(sqlContext: HiveContext) extends ParserDialect {
-  override def parse(sqlText: String): LogicalPlan = {
-    sqlContext.executionHive.withHiveState {
-      HiveQl.parseSql(sqlText)
-    }
-  }
-}
 
 /**
  * Returns the current database of metadataHive.
@@ -90,8 +79,8 @@ class HiveContext private[hive](
     sc: SparkContext,
     cacheManager: CacheManager,
     listener: SQLListener,
-    @transient private val execHive: ClientWrapper,
-    @transient private val metaHive: ClientInterface,
+    @transient private val execHive: HiveClientImpl,
+    @transient private val metaHive: HiveClient,
     isRootContext: Boolean)
   extends SQLContext(sc, cacheManager, listener, isRootContext) with Logging {
   self =>
@@ -204,17 +193,17 @@ class HiveContext private[hive](
    * for storing persistent metadata, and only point to a dummy metastore in a temporary directory.
    */
   @transient
-  protected[hive] lazy val executionHive: ClientWrapper = if (execHive != null) {
+  protected[hive] lazy val executionHive: HiveClientImpl = if (execHive != null) {
     execHive
   } else {
     logInfo(s"Initializing execution hive, version $hiveExecutionVersion")
     val loader = new IsolatedClientLoader(
       version = IsolatedClientLoader.hiveVersion(hiveExecutionVersion),
       execJars = Seq(),
-      config = newTemporaryConfiguration(),
+      config = newTemporaryConfiguration(useInMemoryDerby = true),
       isolationOn = false,
       baseClassLoader = Utils.getContextOrSparkClassLoader)
-    loader.createClient().asInstanceOf[ClientWrapper]
+    loader.createClient().asInstanceOf[HiveClientImpl]
   }
 
   /**
@@ -233,7 +222,7 @@ class HiveContext private[hive](
    * in the hive-site.xml file.
    */
   @transient
-  protected[hive] lazy val metadataHive: ClientInterface = if (metaHive != null) {
+  protected[hive] lazy val metadataHive: HiveClient = if (metaHive != null) {
     metaHive
   } else {
     val metaVersion = IsolatedClientLoader.hiveVersion(hiveMetastoreVersion)
@@ -288,7 +277,8 @@ class HiveContext private[hive](
       logInfo(
         s"Initializing HiveMetastoreConnection version $hiveMetastoreVersion using maven.")
       IsolatedClientLoader.forVersion(
-        version = hiveMetastoreVersion,
+        hiveMetastoreVersion = hiveMetastoreVersion,
+        hadoopVersion = VersionInfo.getVersion,
         config = allConfig,
         barrierPrefixes = hiveMetastoreBarrierPrefixes,
         sharedPrefixes = hiveMetastoreSharedPrefixes)
@@ -326,7 +316,9 @@ class HiveContext private[hive](
   }
 
   protected[sql] override def parseSql(sql: String): LogicalPlan = {
-    super.parseSql(substitutor.substitute(hiveconf, sql))
+    executionHive.withHiveState {
+      super.parseSql(substitutor.substitute(hiveconf, sql))
+    }
   }
 
   override protected[sql] def executePlan(plan: LogicalPlan): this.QueryExecution =
@@ -341,12 +333,12 @@ class HiveContext private[hive](
    * @since 1.3.0
    */
   def refreshTable(tableName: String): Unit = {
-    val tableIdent = SqlParser.parseTableIdentifier(tableName)
+    val tableIdent = sqlParser.parseTableIdentifier(tableName)
     catalog.refreshTable(tableIdent)
   }
 
   protected[hive] def invalidateTable(tableName: String): Unit = {
-    val tableIdent = SqlParser.parseTableIdentifier(tableName)
+    val tableIdent = sqlParser.parseTableIdentifier(tableName)
     catalog.invalidateTable(tableIdent)
   }
 
@@ -360,8 +352,8 @@ class HiveContext private[hive](
    * @since 1.2.0
    */
   def analyze(tableName: String) {
-    val tableIdent = SqlParser.parseTableIdentifier(tableName)
-    val relation = EliminateSubQueries(catalog.lookupRelation(tableIdent))
+    val tableIdent = sqlParser.parseTableIdentifier(tableName)
+    val relation = EliminateSubqueryAliases(catalog.lookupRelation(tableIdent))
 
     relation match {
       case relation: MetastoreRelation =>
@@ -378,7 +370,7 @@ class HiveContext private[hive](
 
         def calculateTableSize(fs: FileSystem, path: Path): Long = {
           val fileStatus = fs.getFileStatus(path)
-          val size = if (fileStatus.isDir) {
+          val size = if (fileStatus.isDirectory) {
             fs.listStatus(path)
               .map { status =>
                 if (!status.getPath().getName().startsWith(stagingDir)) {
@@ -473,8 +465,7 @@ class HiveContext private[hive](
         catalog.ParquetConversions ::
         catalog.CreateTables ::
         catalog.PreInsertionCasts ::
-        ExtractPythonUDFs ::
-        ResolveHiveWindowFunction ::
+        python.ExtractPythonUDFs ::
         PreInsertCastAndRename ::
         (if (conf.runSQLOnFile) new ResolveDataSource(self) :: Nil else Nil)
 
@@ -553,20 +544,14 @@ class HiveContext private[hive](
   }
 
   protected[sql] override lazy val conf: SQLConf = new SQLConf {
-    override def dialect: String = getConf(SQLConf.DIALECT, "hiveql")
     override def caseSensitiveAnalysis: Boolean = getConf(SQLConf.CASE_SENSITIVE, false)
   }
 
-  protected[sql] override def getSQLDialect(): ParserDialect = {
-    if (conf.dialect == "hiveql") {
-      new HiveQLDialect(this)
-    } else {
-      super.getSQLDialect()
-    }
-  }
+  @transient
+  protected[sql] override val sqlParser: ParserInterface = new HiveQl(conf)
 
   @transient
-  private val hivePlanner = new SparkPlanner with HiveStrategies {
+  private val hivePlanner = new SparkPlanner(this) with HiveStrategies {
     val hiveContext = self
 
     override def strategies: Seq[Strategy] = experimental.extraStrategies ++ Seq(
@@ -574,7 +559,7 @@ class HiveContext private[hive](
       HiveCommandStrategy(self),
       HiveDDLStrategy,
       DDLStrategy,
-      TakeOrderedAndProject,
+      SpecialLimits,
       InMemoryScans,
       HiveTableScans,
       DataSinks,
@@ -691,11 +676,14 @@ private[hive] object HiveContext {
   val CONVERT_METASTORE_PARQUET_WITH_SCHEMA_MERGING = booleanConf(
     "spark.sql.hive.convertMetastoreParquet.mergeSchema",
     defaultValue = Some(false),
-    doc = "TODO")
+    doc = "When true, also tries to merge possibly different but compatible Parquet schemas in " +
+      "different Parquet data files. This configuration is only effective " +
+      "when \"spark.sql.hive.convertMetastoreParquet\" is true.")
 
   val CONVERT_CTAS = booleanConf("spark.sql.hive.convertCTAS",
     defaultValue = Some(false),
-    doc = "TODO")
+    doc = "When true, a table created by a Hive CTAS statement (no USING clause) will be " +
+      "converted to a data source table, using the data source set by spark.sql.sources.default.")
 
   val HIVE_METASTORE_SHARED_PREFIXES = stringSeqConf("spark.sql.hive.metastore.sharedPrefixes",
     defaultValue = Some(jdbcPrefixes),
@@ -716,10 +704,12 @@ private[hive] object HiveContext {
 
   val HIVE_THRIFT_SERVER_ASYNC = booleanConf("spark.sql.hive.thriftServer.async",
     defaultValue = Some(true),
-    doc = "TODO")
+    doc = "When set to true, Hive Thrift server executes SQL queries in an asynchronous way.")
 
   /** Constructs a configuration for hive, where the metastore is located in a temp directory. */
-  def newTemporaryConfiguration(): Map[String, String] = {
+  def newTemporaryConfiguration(useInMemoryDerby: Boolean): Map[String, String] = {
+    val withInMemoryMode = if (useInMemoryDerby) "memory:" else ""
+
     val tempDir = Utils.createTempDir()
     val localMetastore = new File(tempDir, "metastore")
     val propMap: HashMap[String, String] = HashMap()
@@ -733,9 +723,24 @@ private[hive] object HiveContext {
     }
     propMap.put(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, localMetastore.toURI.toString)
     propMap.put(HiveConf.ConfVars.METASTORECONNECTURLKEY.varname,
-      s"jdbc:derby:;databaseName=${localMetastore.getAbsolutePath};create=true")
+      s"jdbc:derby:${withInMemoryMode};databaseName=${localMetastore.getAbsolutePath};create=true")
     propMap.put("datanucleus.rdbms.datastoreAdapterClassName",
       "org.datanucleus.store.rdbms.adapter.DerbyAdapter")
+
+    // SPARK-11783: When "hive.metastore.uris" is set, the metastore connection mode will be
+    // remote (https://cwiki.apache.org/confluence/display/Hive/AdminManual+MetastoreAdmin
+    // mentions that "If hive.metastore.uris is empty local mode is assumed, remote otherwise").
+    // Remote means that the metastore server is running in its own process.
+    // When the mode is remote, configurations like "javax.jdo.option.ConnectionURL" will not be
+    // used (because they are used by remote metastore server that talks to the database).
+    // Because execution Hive should always connects to a embedded derby metastore.
+    // We have to remove the value of hive.metastore.uris. So, the execution Hive client connects
+    // to the actual embedded derby metastore instead of the remote metastore.
+    // You can search HiveConf.ConfVars.METASTOREURIS in the code of HiveConf (in Hive's repo).
+    // Then, you will find that the local metastore mode is only set to true when
+    // hive.metastore.uris is not set.
+    propMap.put(ConfVars.METASTOREURIS.varname, "")
+
     propMap.toMap
   }
 
