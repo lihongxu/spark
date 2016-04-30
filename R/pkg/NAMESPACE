@@ -109,7 +109,7 @@ exportMethods("arrange",
               "write.json",
               "write.parquet",
               "write.text",
-              "ml.save")
+              "write.ml")
 
 exportClasses("Column")
 
@@ -304,7 +304,7 @@ export("as.DataFrame",
        "tables",
        "uncacheTable",
        "print.summary.GeneralizedLinearRegressionModel",
-       "ml.load")
+       "read.ml")
 
 export("structField",
        "structField.jobj",

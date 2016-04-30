@@ -49,7 +49,7 @@ setClass("KMeansModel", representation(jobj = "jobj"))
 #'
 #' Fits a generalized linear model against a Spark DataFrame.
 #'
-#' @param data SparkDataFrame for training.
+#' @param df SparkDataFrame for training.
 #' @param formula A symbolic description of the model to be fitted. Currently only a few formula
 #'                operators are supported, including '~', '.', ':', '+', and '-'.
 #' @param family A description of the error distribution and link function to be used in the model.
@@ -72,8 +72,8 @@ setClass("KMeansModel", representation(jobj = "jobj"))
 #' }
 setMethod(
     "spark.glm",
-    signature(data = "SparkDataFrame", formula = "formula"),
-    function(data, formula, family = gaussian, epsilon = 1e-06, maxit = 25) {
+    signature(df = "SparkDataFrame", formula = "formula"),
+    function(df, formula, family = gaussian, epsilon = 1e-06, maxit = 25) {
         if (is.character(family)) {
             family <- get(family, mode = "function", envir = parent.frame())
         }
@@ -88,14 +88,16 @@ setMethod(
         formula <- paste(deparse(formula), collapse = "")
 
         jobj <- callJStatic("org.apache.spark.ml.r.GeneralizedLinearRegressionWrapper",
-        "fit", formula, data@sdf, family$family, family$link,
+        "fit", formula, df@sdf, family$family, family$link,
         epsilon, as.integer(maxit))
         return(new("GeneralizedLinearRegressionModel", jobj = jobj))
 })
 
 #' Fits a generalized linear model (R-compliant).
 #'
-#' Fits a generalized linear model, similarly to R's glm().
+#' Fits a generalized linear model, similarly to R's glm(). This function tries to emaulate the
+# behavior of glm() on R's DataFrames. If more Spark-related tuning is required, the alternative
+# spark.glm() is recommended.
 #'
 #' @param formula A symbolic description of the model to be fitted. Currently only a few formula
 #'                operators are supported, including '~', '.', ':', '+', and '-'.
@@ -270,7 +272,7 @@ setMethod("summary", signature(object = "NaiveBayesModel"),
 #'
 #' Fit a k-means model, similarly to R's kmeans().
 #'
-#' @param data SparkDataFrame for training
+#' @param df SparkDataFrame for training
 #' @param k Number of centers
 #' @param maxIter Maximum iteration number
 #' @param initializationMode Algorithm choosen to fit the model
@@ -279,13 +281,13 @@ setMethod("summary", signature(object = "NaiveBayesModel"),
 #' @export
 #' @examples
 #' \dontrun{
-#' model <- spark.kmeans(data, k = 2, initializationMode="random")
+#' model <- spark.kmeans(df, k = 2, initializationMode="random")
 #' }
-setMethod("spark.kmeans", signature(data = "SparkDataFrame"),
-          function(data, k, maxIter = 10, initializationMode = c("random", "k-means||")) {
-            columnNames <- as.array(colnames(data))
+setMethod("spark.kmeans", signature(df = "SparkDataFrame"),
+          function(df, k, maxIter = 10, initializationMode = c("random", "k-means||")) {
+            columnNames <- as.array(colnames(df))
             initializationMode <- match.arg(initializationMode)
-            jobj <- callJStatic("org.apache.spark.ml.r.KMeansWrapper", "fit", data@sdf,
+            jobj <- callJStatic("org.apache.spark.ml.r.KMeansWrapper", "fit", df@sdf,
                                 k, maxIter, initializationMode, columnNames)
             return(new("KMeansModel", jobj = jobj))
          })
@@ -375,7 +377,7 @@ setMethod("predict", signature(object = "KMeansModel"),
 #'
 #' Fit a Bernoulli naive Bayes model on a Spark DataFrame (only categorical data is supported).
 #'
-#' @param data SparkDataFrame for training
+#' @param df SparkDataFrame for training
 #' @param object A symbolic description of the model to be fitted. Currently only a few formula
 #'               operators are supported, including '~', '.', ':', '+', and '-'.
 #' @param laplace Smoothing parameter
@@ -388,11 +390,11 @@ setMethod("predict", signature(object = "KMeansModel"),
 #' df <- createDataFrame(sqlContext, infert)
 #' model <- spark.naiveBayes(df, education ~ ., laplace = 0)
 #'}
-setMethod("spark.naiveBayes", signature(data = "SparkDataFrame", formula = "formula"),
-    function(data, formula, laplace = 0, ...) {
+setMethod("spark.naiveBayes", signature(df = "SparkDataFrame", formula = "formula"),
+    function(df, formula, laplace = 0, ...) {
         formula <- paste(deparse(formula), collapse = "")
         jobj <- callJStatic("org.apache.spark.ml.r.NaiveBayesWrapper", "fit",
-          formula, data@sdf, laplace)
+          formula, df@sdf, laplace)
         return(new("NaiveBayesModel", jobj = jobj))
     })
 
@@ -403,17 +405,17 @@ setMethod("spark.naiveBayes", signature(data = "SparkDataFrame", formula = "form
 #' @param overwrite Overwrites or not if the output path already exists. Default is FALSE
 #'                  which means throw exception if the output path exists.
 #'
-#' @rdname ml.save
-#' @name ml.save
+#' @rdname write.ml
+#' @name write.ml
 #' @export
 #' @examples
 #' \dontrun{
 #' df <- createDataFrame(sqlContext, infert)
 #' model <- spark.naiveBayes(education ~ ., df, laplace = 0)
 #' path <- "path/to/model"
-#' ml.save(model, path)
+#' write.ml(model, path)
 #' }
-setMethod("ml.save", signature(object = "NaiveBayesModel", path = "character"),
+setMethod("write.ml", signature(object = "NaiveBayesModel", path = "character"),
           function(object, path, overwrite = FALSE) {
             writer <- callJMethod(object@jobj, "write")
             if (overwrite) {
@@ -429,16 +431,16 @@ setMethod("ml.save", signature(object = "NaiveBayesModel", path = "character"),
 #' @param overwrite Overwrites or not if the output path already exists. Default is FALSE
 #'                  which means throw exception if the output path exists.
 #'
-#' @rdname ml.save
-#' @name ml.save
+#' @rdname write.ml
+#' @name write.ml
 #' @export
 #' @examples
 #' \dontrun{
 #' model <- spark.survreg(trainingData, Surv(futime, fustat) ~ ecog_ps + rx)
 #' path <- "path/to/model"
-#' ml.save(model, path)
+#' write.ml(model, path)
 #' }
-setMethod("ml.save", signature(object = "AFTSurvivalRegressionModel", path = "character"),
+setMethod("write.ml", signature(object = "AFTSurvivalRegressionModel", path = "character"),
           function(object, path, overwrite = FALSE) {
             writer <- callJMethod(object@jobj, "write")
             if (overwrite) {
@@ -454,16 +456,16 @@ setMethod("ml.save", signature(object = "AFTSurvivalRegressionModel", path = "ch
 #' @param overwrite Overwrites or not if the output path already exists. Default is FALSE
 #'                  which means throw exception if the output path exists.
 #'
-#' @rdname ml.save
-#' @name ml.save
+#' @rdname write.ml
+#' @name write.ml
 #' @export
 #' @examples
 #' \dontrun{
 #' model <- glm(y ~ x, trainingData)
 #' path <- "path/to/model"
-#' ml.save(model, path)
+#' write.ml(model, path)
 #' }
-setMethod("ml.save", signature(object = "GeneralizedLinearRegressionModel", path = "character"),
+setMethod("write.ml", signature(object = "GeneralizedLinearRegressionModel", path = "character"),
           function(object, path, overwrite = FALSE) {
             writer <- callJMethod(object@jobj, "write")
             if (overwrite) {
@@ -479,16 +481,16 @@ setMethod("ml.save", signature(object = "GeneralizedLinearRegressionModel", path
 #' @param overwrite Overwrites or not if the output path already exists. Default is FALSE
 #'                  which means throw exception if the output path exists.
 #'
-#' @rdname ml.save
-#' @name ml.save
+#' @rdname write.ml
+#' @name write.ml
 #' @export
 #' @examples
 #' \dontrun{
 #' model <- spark.kmeans(x, k = 2, initializationMode="random")
 #' path <- "path/to/model"
-#' ml.save(model, path)
+#' write.ml(model, path)
 #' }
-setMethod("ml.save", signature(object = "KMeansModel", path = "character"),
+setMethod("write.ml", signature(object = "KMeansModel", path = "character"),
           function(object, path, overwrite = FALSE) {
             writer <- callJMethod(object@jobj, "write")
             if (overwrite) {
@@ -501,15 +503,15 @@ setMethod("ml.save", signature(object = "KMeansModel", path = "character"),
 #'
 #' @param path Path of the model to read.
 #' @return a fitted MLlib model
-#' @rdname ml.load
-#' @name ml.load
+#' @rdname read.ml
+#' @name read.ml
 #' @export
 #' @examples
 #' \dontrun{
 #' path <- "path/to/model"
-#' model <- ml.load(path)
+#' model <- read.ml(path)
 #' }
-ml.load <- function(path) {
+read.ml <- function(path) {
   path <- suppressWarnings(normalizePath(path))
   jobj <- callJStatic("org.apache.spark.ml.r.RWrappers", "load", path)
   if (isInstanceOf(jobj, "org.apache.spark.ml.r.NaiveBayesWrapper")) {
@@ -529,7 +531,7 @@ ml.load <- function(path) {
 #'
 #' Fit an accelerated failure time (AFT) survival regression model on a Spark DataFrame.
 #'
-#' @param data SparkDataFrame for training.
+#' @param df SparkDataFrame for training.
 #' @param formula A symbolic description of the model to be fitted. Currently only a few formula
 #'                operators are supported, including '~', ':', '+', and '-'.
 #'                Note that operator '.' is not supported currently.
@@ -542,11 +544,11 @@ ml.load <- function(path) {
 #' df <- createDataFrame(sqlContext, ovarian)
 #' model <- spark.survreg(Surv(df, futime, fustat) ~ ecog_ps + rx)
 #' }
-setMethod("spark.survreg", signature(data = "SparkDataFrame", formula = "formula"),
-          function(data, formula, ...) {
+setMethod("spark.survreg", signature(df = "SparkDataFrame", formula = "formula"),
+          function(df, formula, ...) {
             formula <- paste(deparse(formula), collapse = "")
             jobj <- callJStatic("org.apache.spark.ml.r.AFTSurvivalRegressionWrapper",
-                                "fit", formula, data@sdf)
+                                "fit", formula, df@sdf)
             return(new("AFTSurvivalRegressionModel", jobj = jobj))
           })
 
